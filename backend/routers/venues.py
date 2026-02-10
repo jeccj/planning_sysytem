@@ -42,9 +42,35 @@ def update_venue(
 ):
     if current_user.role not in [models.UserRole.sys_admin, models.UserRole.venue_admin]:
         raise HTTPException(status_code=403, detail="Not authorized")
-    updated_venue = crud.update_venue(db, venue_id=venue_id, venue_data=venue)
-    if not updated_venue:
+    
+    # 获取原场地信息
+    old_venue = db.query(models.Venue).filter(models.Venue.id == venue_id).first()
+    if not old_venue:
         raise HTTPException(status_code=404, detail="Venue not found")
+    
+    old_status = old_venue.status
+    
+    updated_venue = crud.update_venue(db, venue_id=venue_id, venue_data=venue)
+    
+    # 如果状态从可用变为维护中，通知已预约的用户
+    if old_status == models.VenueStatus.available and venue.status == models.VenueStatus.maintenance:
+        # 获取该场地所有待审核或已通过的预约
+        affected_reservations = db.query(models.Reservation).filter(
+            models.Reservation.venue_id == venue_id,
+            models.Reservation.status.in_([models.ReservationStatus.pending, models.ReservationStatus.approved])
+        ).all()
+        
+        # 为每个受影响的用户发送通知
+        for res in affected_reservations:
+            notification = models.Notification(
+                user_id=res.user_id,
+                title="场地维护通知",
+                content=f"您预约的场地「{updated_venue.name}」已被标记为维护状态，您的预约「{res.activity_name}」可能受到影响，请关注后续通知或重新预约其他场地。",
+                notification_type="venue_change"
+            )
+            db.add(notification)
+        db.commit()
+    
     return updated_venue
 
 @router.get("/search", response_model=List[schemas.VenueResponse])

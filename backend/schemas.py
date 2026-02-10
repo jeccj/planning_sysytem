@@ -41,6 +41,8 @@ class VenueBase(BaseModel):
     facilities: List[str]
     status: VenueStatus = VenueStatus.available
     image_url: Optional[str] = None
+    open_hours: Optional[str] = None  # 开放时间
+    description: Optional[str] = None  # 场地描述
 
 class VenueCreate(VenueBase):
     pass
@@ -100,6 +102,24 @@ class AnnouncementUpdate(BaseModel):
 class AnnouncementResponse(AnnouncementBase):
     id: int
     publish_time: datetime
+
+    class Config:
+        from_attributes = True
+
+# --- Notification Schemas ---
+class NotificationBase(BaseModel):
+    title: str
+    content: str
+    notification_type: str = "system"
+
+class NotificationCreate(NotificationBase):
+    user_id: int
+
+class NotificationResponse(NotificationBase):
+    id: int
+    user_id: int
+    is_read: bool
+    created_at: datetime
 
     class Config:
         from_attributes = True

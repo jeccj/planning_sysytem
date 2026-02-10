@@ -11,7 +11,8 @@ import {
   UserFilled,
   House,
   CircleCheck,
-  SwitchButton
+  SwitchButton,
+  Bell
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -28,6 +29,58 @@ const latestAnnouncement = ref(null)
 const showChangePwd = ref(false)
 const pwdForm = ref({ old_password: '', new_password: '', confirm_password: '' })
 
+// 通知相关
+const unreadNotificationCount = ref(0)
+const showNotificationPanel = ref(false)
+const notifications = ref([])
+
+const fetchUnreadCount = async () => {
+    try {
+        const res = await api.get('/notifications/unread-count')
+        unreadNotificationCount.value = res.data.count
+    } catch (e) {
+        console.error('获取未读通知数失败', e)
+    }
+}
+
+const fetchNotifications = async () => {
+    try {
+        const res = await api.get('/notifications/')
+        notifications.value = res.data
+    } catch (e) {
+        console.error('获取通知列表失败', e)
+    }
+}
+
+const toggleNotificationPanel = async () => {
+    showNotificationPanel.value = !showNotificationPanel.value
+    if (showNotificationPanel.value) {
+        await fetchNotifications()
+    }
+}
+
+const markAsRead = async (notification) => {
+    if (notification.is_read) return
+    try {
+        await api.put(`/notifications/${notification.id}/read`)
+        notification.is_read = true
+        unreadNotificationCount.value = Math.max(0, unreadNotificationCount.value - 1)
+    } catch (e) {
+        console.error('标记已读失败', e)
+    }
+}
+
+const markAllAsRead = async () => {
+    try {
+        await api.put('/notifications/read-all')
+        notifications.value.forEach(n => n.is_read = true)
+        unreadNotificationCount.value = 0
+        ElMessage.success('已全部标记为已读')
+    } catch (e) {
+        console.error('标记已读失败', e)
+    }
+}
+
 onMounted(() => {
     // Check for first login
     if (authStore.user?.is_first_login) {
@@ -39,6 +92,12 @@ onMounted(() => {
 
     // Load latest announcement
     fetchLatestAnnouncement()
+    
+    // 获取未读通知数
+    fetchUnreadCount()
+    
+    // 定时刷新未读通知数
+    setInterval(fetchUnreadCount, 60000) // 每分钟刷新一次
 })
 
 const apiStatus = ref('loading') // 'connected', 'error', 'loading'
@@ -217,7 +276,41 @@ const handleLogout = () => {
               <span class="status-text">{{ apiStatus === 'connected' ? 'Online' : 'Offline' }}</span>
           </div>
           
-          <!-- Right Island: User Profile -->
+          <!-- Notification Bell -->
+          <div class="notification-container" @mouseenter="showNotificationPanel = true" @mouseleave="showNotificationPanel = false">
+            <div class="notification-bell glass-pill" @click="toggleNotificationPanel">
+                <el-badge :value="unreadNotificationCount" :hidden="unreadNotificationCount === 0" :max="99">
+                    <el-icon :size="20"><Bell /></el-icon>
+                </el-badge>
+            </div>
+            
+            <!-- Notification Panel -->
+            <transition name="island-pop">
+                <div v-if="showNotificationPanel" class="notification-panel glass-pill">
+                    <div class="notification-header">
+                        <span>消息通知</span>
+                        <el-button v-if="notifications.length > 0" text size="small" @click="markAllAsRead">全部已读</el-button>
+                    </div>
+                    <div class="notification-list" v-if="notifications.length > 0">
+                        <div 
+                            v-for="item in notifications" 
+                            :key="item.id" 
+                            class="notification-item"
+                            :class="{ 'is-unread': !item.is_read }"
+                            @click="markAsRead(item)"
+                        >
+                            <div class="notification-title">{{ item.title }}</div>
+                            <div class="notification-content">{{ item.content }}</div>
+                            <div class="notification-time">{{ formatTime(item.created_at) }}</div>
+                        </div>
+                    </div>
+                    <div v-else class="notification-empty">
+                        暂无通知
+                    </div>
+                </div>
+            </transition>
+          </div>
+          
           <!-- Right Island: User Profile -->
           <div class="header-right-container" @mouseenter="showUserMenu = true" @mouseleave="showUserMenu = false">
             <div class="header-right glass-pill">
@@ -534,6 +627,128 @@ html.dark .menu-item:hover {
     transform: rotate(180deg);
 }
 
+/* Notification Styles */
+.notification-container {
+    position: fixed;
+    top: 32px;
+    right: 240px;
+    z-index: 910;
+    pointer-events: auto;
+}
+
+.notification-bell {
+    cursor: pointer;
+    padding: 10px 16px !important;
+}
+
+.notification-bell .el-icon {
+    color: #1d1d1f;
+}
+
+html.dark .notification-bell .el-icon {
+    color: #fff;
+}
+
+.notification-panel {
+    position: absolute;
+    top: 55px;
+    right: 0;
+    width: 320px;
+    max-height: 400px;
+    padding: 0 !important;
+    overflow: hidden;
+    flex-direction: column;
+    cursor: default;
+}
+
+.notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    font-weight: 600;
+    font-size: 15px;
+}
+
+html.dark .notification-header {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.notification-list {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.notification-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.notification-item:hover {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+html.dark .notification-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.notification-item.is-unread {
+    background: rgba(64, 158, 255, 0.05);
+}
+
+.notification-item.is-unread::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--el-color-primary);
+}
+
+.notification-title {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 4px;
+    color: #1d1d1f;
+}
+
+html.dark .notification-title {
+    color: #fff;
+}
+
+.notification-content {
+    font-size: 13px;
+    color: #666;
+    line-height: 1.5;
+    margin-bottom: 4px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+html.dark .notification-content {
+    color: #aaa;
+}
+
+.notification-time {
+    font-size: 11px;
+    color: #999;
+}
+
+.notification-empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+}
+
 
 /* Island Pop Animation (Apple Spring) */
 .island-pop-enter-active {
@@ -725,6 +940,7 @@ html.dark :deep(.el-menu-item.is-active) {
 @media (max-width: 1024px) {
     .header-left { left: 100px; }
     .header-right-container { right: 24px; }
+    .notification-container { right: 200px; }
     .main-content {
         padding: 100px 24px 30px 100px;
     }
@@ -879,6 +1095,7 @@ html.dark :deep(.el-menu-item.is-active) {
     /* Standard Header Positions - UNIFIED VERTICAL ALIGNMENT */
     .header-left { left: 20px; top: 16px; }
     .header-right-container { right: 20px; top: 16px; }
+    .notification-container { right: 150px; top: 16px; }
     .status-island { top: 16px; }
     
     .main-content {

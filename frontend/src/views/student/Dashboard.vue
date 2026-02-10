@@ -1,12 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import SmartSearch from '../../components/SmartSearch.vue'
 import api from '../../api/axios'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, Minus, Plus } from '@element-plus/icons-vue'
-import GlassDatePicker from '../../components/GlassDatePicker.vue'
+import { ArrowRight, Minus, Plus, Filter, View, Location, Clock } from '@element-plus/icons-vue'
 import VenueCard from '../../components/VenueCard.vue'
 
 const authStore = useAuthStore()
@@ -15,6 +14,79 @@ const activeTab = ref('browse')
 const venues = ref([])
 const allVenues = ref([])
 const latestAnnouncement = ref(null)
+
+// 筛选条件
+const filterForm = ref({
+    type: '',
+    minCapacity: null,
+    facilities: [],
+    status: '',
+    location: ''
+})
+const showFilterPanel = ref(false)
+
+// 场地详情弹窗
+const showVenueDetail = ref(false)
+const selectedVenueDetail = ref(null)
+
+const facilityOptions = ['投影仪', '音响设备', '白板', '电脑', '舞台']
+const venueTypeOptions = [
+    { label: '全部类型', value: '' },
+    { label: '教室', value: 'Classroom' },
+    { label: '礼堂', value: 'Hall' },
+    { label: '实验室', value: 'Lab' }
+]
+
+// 计算筛选后的场地列表
+const filteredVenues = computed(() => {
+    let result = [...allVenues.value]
+    
+    // 按类型筛选
+    if (filterForm.value.type) {
+        result = result.filter(v => v.type === filterForm.value.type)
+    }
+    
+    // 按容量筛选
+    if (filterForm.value.minCapacity) {
+        result = result.filter(v => v.capacity >= filterForm.value.minCapacity)
+    }
+    
+    // 按设施筛选
+    if (filterForm.value.facilities.length > 0) {
+        result = result.filter(v => {
+            const vFacilities = v.facilities || []
+            return filterForm.value.facilities.every(f => vFacilities.includes(f))
+        })
+    }
+    
+    // 按状态筛选
+    if (filterForm.value.status) {
+        result = result.filter(v => v.status === filterForm.value.status)
+    }
+    
+    // 按位置筛选
+    if (filterForm.value.location) {
+        const keyword = filterForm.value.location.toLowerCase()
+        result = result.filter(v => v.location?.toLowerCase().includes(keyword))
+    }
+    
+    return result
+})
+
+const resetFilters = () => {
+    filterForm.value = {
+        type: '',
+        minCapacity: null,
+        facilities: [],
+        status: '',
+        location: ''
+    }
+}
+
+const openVenueDetail = (venue) => {
+    selectedVenueDetail.value = venue
+    showVenueDetail.value = true
+}
 
 const fetchAllVenues = async () => {
     try {
@@ -226,10 +298,39 @@ const reservationForm = ref({
   contact_phone: '',
   proposal_content: '',
   attendees_count: 10,
-  start_time: '',
-  end_time: ''
+  date: '',
+    start_time_input: '',
+    end_time_input: ''
 })
 const showProposalModal = ref(false)
+
+const timeStringToMinutes = (timeStr) => {
+        if (!timeStr) return null
+        const match = timeStr.match(/^(\d{2}):(\d{2})$/)
+        if (!match) return null
+        const hours = parseInt(match[1])
+        const minutes = parseInt(match[2])
+        if (hours > 23 || minutes > 59) return null
+        return hours * 60 + minutes
+}
+
+const toLocalDateString = (date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+}
+
+const buildDateTimeString = (dateStr, timeStr) => {
+    if (!dateStr || !timeStr) return null
+    return `${dateStr}T${timeStr}:00`
+}
+
+const isValidDateTimeString = (value) => {
+    if (!value) return false
+    const date = new Date(value)
+    return !Number.isNaN(date.getTime())
+}
 
 const openBooking = (venue) => {
     selectedVenue.value = venue
@@ -242,6 +343,20 @@ const openBooking = (venue) => {
         }
         if (parsedIntent.value.attendees_count) {
              reservationForm.value.attendees_count = parsedIntent.value.attendees_count
+        }
+
+        if (parsedIntent.value.start_time) {
+            const startDate = new Date(parsedIntent.value.start_time)
+            const endDate = parsedIntent.value.end_time ? new Date(parsedIntent.value.end_time) : null
+            reservationForm.value.date = toLocalDateString(startDate)
+            reservationForm.value.start_time_input = startDate.toTimeString().slice(0, 5)
+            if (endDate) {
+                reservationForm.value.end_time_input = endDate.toTimeString().slice(0, 5)
+            } else {
+                const defaultEnd = new Date(startDate)
+                defaultEnd.setHours(defaultEnd.getHours() + 2)
+                reservationForm.value.end_time_input = defaultEnd.toTimeString().slice(0, 5)
+            }
         }
         
         // Notification: FILL Complete
@@ -257,19 +372,48 @@ const openBooking = (venue) => {
         // Reset to clean state if no intent
          reservationForm.value.attendees_count = 10
          reservationForm.value.activity_name = ''
-         reservationForm.value.start_time = ''
-         reservationForm.value.end_time = ''
+            reservationForm.value.date = ''
+            reservationForm.value.start_time_input = ''
+            reservationForm.value.end_time_input = ''
     }
     
     showModal.value = true
 }
 
 const submitBooking = async () => {
+    if (!reservationForm.value.date) {
+        ElMessage.error('请选择预约日期')
+        return
+    }
+    if (!reservationForm.value.start_time_input || !reservationForm.value.end_time_input) {
+        ElMessage.error('请填写开始时间和结束时间')
+        return
+    }
+
+    const startMinutes = timeStringToMinutes(reservationForm.value.start_time_input)
+    const endMinutes = timeStringToMinutes(reservationForm.value.end_time_input)
+    if (startMinutes === null || endMinutes === null) {
+        ElMessage.error('时间格式无效，请使用 HH:mm')
+        return
+    }
+    if (endMinutes <= startMinutes) {
+        ElMessage.error('结束时间必须晚于开始时间')
+        return
+    }
+
+    const startDateTime = buildDateTimeString(reservationForm.value.date, reservationForm.value.start_time_input)
+    const endDateTime = buildDateTimeString(reservationForm.value.date, reservationForm.value.end_time_input)
+    if (!isValidDateTimeString(startDateTime) || !isValidDateTimeString(endDateTime)) {
+        ElMessage.error('时间无效，请重新填写')
+        return
+    }
     try {
         await api.post('/reservations/', {
             venue_id: selectedVenue.value.id,
             organizer: authStore.user.username,
-            ...reservationForm.value
+            ...reservationForm.value,
+            start_time: startDateTime,
+            end_time: endDateTime
         })
         ElMessage.success("申请提交成功")
         showModal.value = false
@@ -335,9 +479,67 @@ const goToAnnouncements = () => {
         </el-tab-pane>
 
         <el-tab-pane label="浏览所有场馆" name="browse">
+             <!-- 筛选面板 -->
+             <div class="filter-bar">
+                 <el-button :icon="Filter" @click="showFilterPanel = !showFilterPanel">
+                     {{ showFilterPanel ? '收起筛选' : '展开筛选' }}
+                 </el-button>
+                 <span class="filter-result-count">共 {{ filteredVenues.length }} 个场馆</span>
+             </div>
+             
+             <el-collapse-transition>
+                 <div v-show="showFilterPanel" class="filter-panel glass-panel">
+                     <el-form :model="filterForm" inline class="filter-form">
+                         <el-form-item label="场馆类型">
+                             <el-select v-model="filterForm.type" placeholder="全部类型" clearable style="width: 120px;">
+                                 <el-option v-for="opt in venueTypeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                             </el-select>
+                         </el-form-item>
+                         <el-form-item label="最小容量">
+                             <el-input-number
+                                 v-model="filterForm.minCapacity"
+                                 class="filter-input filter-input--capacity"
+                                 :min="0"
+                                 :max="1000"
+                                 controls-position="right"
+                             />
+                         </el-form-item>
+                         <el-form-item label="位置">
+                             <el-input
+                                 v-model="filterForm.location"
+                                 class="filter-input filter-input--keyword"
+                                 placeholder="关键词"
+                                 clearable
+                             />
+                         </el-form-item>
+                         <el-form-item label="状态">
+                             <el-select v-model="filterForm.status" placeholder="全部" clearable style="width: 100px;">
+                                 <el-option label="可用" value="available" />
+                                 <el-option label="维护中" value="maintenance" />
+                             </el-select>
+                         </el-form-item>
+                         <el-form-item label="设施要求">
+                             <el-checkbox-group v-model="filterForm.facilities">
+                                 <el-checkbox v-for="f in facilityOptions" :key="f" :label="f">{{ f }}</el-checkbox>
+                             </el-checkbox-group>
+                         </el-form-item>
+                         <el-form-item>
+                             <el-button @click="resetFilters">重置</el-button>
+                         </el-form-item>
+                     </el-form>
+                 </div>
+             </el-collapse-transition>
+             
              <div class="results-grid">
-                <VenueCard v-for="venue in allVenues" :key="venue.id" :venue="venue" @book="openBooking" />
+                <VenueCard 
+                    v-for="venue in filteredVenues" 
+                    :key="venue.id" 
+                    :venue="venue" 
+                    @book="openBooking"
+                    @view-detail="openVenueDetail"
+                />
             </div>
+            <el-empty v-if="filteredVenues.length === 0" description="没有符合条件的场馆" />
         </el-tab-pane>
     </el-tabs>
 
@@ -384,13 +586,36 @@ const goToAnnouncements = () => {
                 </el-form-item>
             </div>
             <div class="form-pill">
-                <el-form-item label="开始时间">
-                    <GlassDatePicker v-model="reservationForm.start_time" placeholder="选择开始时间" />
-                </el-form-item>
-            </div>
-            <div class="form-pill">
-                <el-form-item label="结束时间">
-                    <GlassDatePicker v-model="reservationForm.end_time" placeholder="选择结束时间" />
+                <el-form-item label="预约时间">
+                    <div class="datetime-range">
+                        <el-date-picker
+                            v-model="reservationForm.date"
+                            type="date"
+                            placeholder="选择日期"
+                            value-format="YYYY-MM-DD"
+                            format="YYYY-MM-DD"
+                            class="date-input"
+                            size="small"
+                        />
+                        <span class="time-separator">/</span>
+                        <el-time-picker
+                            v-model="reservationForm.start_time_input"
+                            placeholder="开始时间"
+                            value-format="HH:mm"
+                            format="HH:mm"
+                            class="time-input start"
+                            size="small"
+                        />
+                        <span class="time-separator">-</span>
+                        <el-time-picker
+                            v-model="reservationForm.end_time_input"
+                            placeholder="结束时间"
+                            value-format="HH:mm"
+                            format="HH:mm"
+                            class="time-input end"
+                            size="small"
+                        />
+                    </div>
                 </el-form-item>
             </div>
         </el-form>
@@ -409,6 +634,75 @@ const goToAnnouncements = () => {
         <template #footer>
             <el-button @click="showProposalModal = false">取消</el-button>
             <el-button type="primary" @click="showProposalModal = false">保存内容</el-button>
+        </template>
+    </el-dialog>
+
+    <!-- 场地详情弹窗 -->
+    <el-dialog v-model="showVenueDetail" title="场地详情" width="600px" class="glass-dialog venue-detail-dialog">
+        <div v-if="selectedVenueDetail" class="venue-detail-content">
+            <!-- 场地图片 -->
+            <div v-if="selectedVenueDetail.image_url" class="venue-image">
+                <el-image :src="selectedVenueDetail.image_url" fit="cover" style="width: 100%; height: 200px; border-radius: 12px;" />
+            </div>
+            <div v-else class="venue-image-placeholder">
+                <el-icon :size="48" color="#ccc"><View /></el-icon>
+                <span>暂无图片</span>
+            </div>
+            
+            <!-- 基本信息 -->
+            <div class="venue-info-grid">
+                <div class="info-item">
+                    <span class="info-label">场地名称</span>
+                    <span class="info-value">{{ selectedVenueDetail.name }}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">场地类型</span>
+                    <el-tag effect="plain">{{ { 'Classroom': '教室', 'Hall': '礼堂', 'Lab': '实验室' }[selectedVenueDetail.type] || selectedVenueDetail.type }}</el-tag>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">容纳人数</span>
+                    <span class="info-value">{{ selectedVenueDetail.capacity }} 人</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">当前状态</span>
+                    <el-tag :type="selectedVenueDetail.status === 'available' ? 'success' : 'danger'" effect="dark">
+                        {{ selectedVenueDetail.status === 'available' ? '可预约' : '维护中' }}
+                    </el-tag>
+                </div>
+            </div>
+            
+            <!-- 位置信息 -->
+            <div class="info-section">
+                <div class="section-title"><el-icon><Location /></el-icon> 具体位置</div>
+                <div class="section-content">{{ selectedVenueDetail.location || '暂无位置信息' }}</div>
+            </div>
+            
+            <!-- 开放时间 -->
+            <div class="info-section">
+                <div class="section-title"><el-icon><Clock /></el-icon> 开放时间</div>
+                <div class="section-content">{{ selectedVenueDetail.open_hours || '08:00 - 22:00 (默认)' }}</div>
+            </div>
+            
+            <!-- 设施配置 -->
+            <div class="info-section">
+                <div class="section-title">设施配置</div>
+                <div class="facilities-list">
+                    <el-tag v-for="f in selectedVenueDetail.facilities" :key="f" type="info" effect="plain" style="margin-right: 8px; margin-bottom: 8px;">{{ f }}</el-tag>
+                    <span v-if="!selectedVenueDetail.facilities || selectedVenueDetail.facilities.length === 0" class="text-gray">暂无设施信息</span>
+                </div>
+            </div>
+            
+            <!-- 场地描述 -->
+            <div v-if="selectedVenueDetail.description" class="info-section">
+                <div class="section-title">场地描述</div>
+                <div class="section-content">{{ selectedVenueDetail.description }}</div>
+            </div>
+        </div>
+        <template #footer>
+            <el-button @click="showVenueDetail = false">关闭</el-button>
+            <el-button type="primary" @click="showVenueDetail = false; openBooking(selectedVenueDetail)" :disabled="selectedVenueDetail?.status !== 'available'">
+                立即预约
+            </el-button>
         </template>
     </el-dialog>
   </div>
@@ -484,6 +778,45 @@ const goToAnnouncements = () => {
     gap: 10px;
     width: 100%;
 }
+.datetime-range {
+    display: inline-flex;
+    align-items: center;
+    padding: 0;
+    gap: 0;
+    max-width: 100%;
+    flex-wrap: nowrap;
+}
+.date-input {
+    width: 104px;
+    min-width: 0;
+}
+.time-input {
+    width: 68px;
+    min-width: 0;
+}
+.datetime-range :deep(.el-input__wrapper) {
+    border-radius: 0 !important;
+    padding: 0 6px !important;
+}
+.date-input :deep(.el-input__wrapper) {
+    border-top-left-radius: 16px !important;
+    border-bottom-left-radius: 16px !important;
+}
+.time-input.end :deep(.el-input__wrapper) {
+    border-top-right-radius: 16px !important;
+    border-bottom-right-radius: 16px !important;
+}
+.date-input :deep(.el-input__inner),
+.time-input :deep(.el-input__inner) {
+    text-align: center;
+}
+.time-separator {
+    color: #999;
+    font-weight: 600;
+    line-height: 28px;
+    margin: 0 4px;
+    font-size: 12px;
+}
 .stepper-input {
     width: 60px;
     --el-input-text-color: #333;
@@ -523,5 +856,135 @@ const goToAnnouncements = () => {
         width: 90% !important;
         max-width: 400px;
     }
+
+    .filter-form {
+        align-items: stretch;
+    }
+
+    .filter-input {
+        width: 100%;
+    }
+}
+
+/* 筛选面板样式 */
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.filter-result-count {
+    font-size: 14px;
+    color: #666;
+}
+
+.filter-panel {
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 16px !important;
+}
+
+.filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: center;
+}
+
+.filter-input {
+    width: 160px;
+}
+
+.filter-input--keyword {
+    width: 200px;
+}
+
+.filter-panel :deep(.el-form-item) {
+    margin-bottom: 0;
+    margin-right: 0;
+}
+
+.filter-panel :deep(.el-checkbox) {
+    margin-right: 12px;
+}
+
+/* 场地详情弹窗样式 */
+.venue-detail-content {
+    padding: 10px 0;
+}
+
+.venue-image {
+    margin-bottom: 20px;
+}
+
+.venue-image-placeholder {
+    height: 150px;
+    background: rgba(245, 245, 245, 0.5);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    color: #999;
+}
+
+.venue-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.info-label {
+    font-size: 12px;
+    color: #888;
+}
+
+.info-value {
+    font-size: 15px;
+    font-weight: 500;
+    color: #1d1d1f;
+}
+
+.info-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: rgba(245, 245, 245, 0.5);
+    border-radius: 10px;
+}
+
+.section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.section-content {
+    font-size: 14px;
+    color: #555;
+    line-height: 1.6;
+}
+
+.facilities-list {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.text-gray {
+    color: #999;
+    font-size: 13px;
 }
 </style>

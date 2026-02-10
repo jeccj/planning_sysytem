@@ -1,21 +1,21 @@
 <script setup>
-import { User, Location, Collection, ArrowRight } from '@element-plus/icons-vue'
+import { User, Location, Collection, ArrowRight, View } from '@element-plus/icons-vue'
 
 defineProps({
     venue: Object
 })
 
-defineEmits(['book'])
+defineEmits(['book', 'view-detail'])
 </script>
 
 <template>
-    <div class="vibrant-glass-card list-mode" @click="$emit('book', venue)">
+    <div class="vibrant-glass-card list-mode">
         <div class="card-glass-substrate"></div>
         <div class="card-sheen"></div>
         
         <div class="card-content-row">
             <!-- Left: Title & Type -->
-            <div class="row-section title-section">
+            <div class="row-section title-section" @click="$emit('view-detail', venue)">
                 <div class="venue-icon">
                     <img v-if="venue.image" :src="venue.image" />
                     <el-icon v-else><Collection /></el-icon>
@@ -27,7 +27,7 @@ defineEmits(['book'])
             </div>
 
             <!-- Middle: Info Stats -->
-            <div class="row-section info-section">
+            <div class="row-section info-section" @click="$emit('view-detail', venue)">
                 <div class="info-pill">
                     <el-icon><User /></el-icon>
                     <span>{{ venue.capacity }}人</span>
@@ -44,8 +44,13 @@ defineEmits(['book'])
                     <span v-for="f in (venue.facilities || []).slice(0, 3)" :key="f" class="micro-tag">{{ f }}</span>
                 </div>
                 
-                <div class="action-btn-circle" :class="{ 'is-busy': venue.status !== 'available' }">
-                    <el-icon><ArrowRight /></el-icon>
+                <div class="action-buttons">
+                    <div class="action-btn-circle view-btn" @click.stop="$emit('view-detail', venue)" title="查看详情">
+                        <el-icon><View /></el-icon>
+                    </div>
+                    <div class="action-btn-circle" :class="{ 'is-busy': venue.status !== 'available' }" @click.stop="$emit('book', venue)" title="预约">
+                        <el-icon><ArrowRight /></el-icon>
+                    </div>
                 </div>
             </div>
         </div>
@@ -191,6 +196,21 @@ defineEmits(['book'])
     color: #999;
     box-shadow: none;
     cursor: not-allowed;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.view-btn {
+    background: rgba(144, 147, 153, 0.8);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.view-btn:hover {
+    background: rgba(144, 147, 153, 1);
 }
 
 /* Responsive Media Queries */

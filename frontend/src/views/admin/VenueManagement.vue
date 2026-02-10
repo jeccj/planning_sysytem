@@ -1,23 +1,32 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const venues = ref([])
+const users = ref([])
 const showModal = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
 
 const form = ref({
   name: '',
-  type: 'Classroom', // Default
+  type: 'Classroom',
   capacity: 30,
   location: '',
   facilities: [],
-  status: 'available'
+  status: 'available',
+  admin_id: null,
+  open_hours: '',
+  description: ''
 })
 
 const facilitiesOptions = ['投影仪', '音响设备', '白板', '电脑', '舞台']
+
+// 获取可分配为场地管理员的用户列表
+const venueAdmins = computed(() => {
+  return users.value.filter(u => u.role === 'venue_admin')
+})
 
 const fetchVenues = async () => {
   try {
@@ -26,14 +35,31 @@ const fetchVenues = async () => {
   } catch (e) { console.error(e) }
 }
 
-onMounted(() => fetchVenues())
+const fetchUsers = async () => {
+  try {
+    const res = await api.get('/users/')
+    users.value = res.data
+  } catch (e) { console.error(e) }
+}
+
+const getAdminName = (adminId) => {
+  if (!adminId) return '未分配'
+  const admin = users.value.find(u => u.id === adminId)
+  return admin ? admin.username : '未知'
+}
+
+onMounted(() => {
+  fetchVenues()
+  fetchUsers()
+})
 
 const openCreate = () => {
     isEdit.value = false
     currentId.value = null
     form.value = { 
         name: '', type: 'Classroom', capacity: 30, location: '', 
-        facilities: [], status: 'available' 
+        facilities: [], status: 'available', admin_id: null,
+        open_hours: '', description: ''
     }
     showModal.value = true
 }
@@ -41,7 +67,7 @@ const openCreate = () => {
 const openEdit = (venue) => {
     isEdit.value = true
     currentId.value = venue.id
-    form.value = { ...venue } // Clone data
+    form.value = { ...venue }
     showModal.value = true
 }
 
@@ -68,6 +94,35 @@ const submitForm = async () => {
     }
 }
 
+// 切换场地状态（可用/维护中）
+const toggleStatus = async (venue) => {
+    const newStatus = venue.status === 'available' ? 'maintenance' : 'available'
+    const actionText = newStatus === 'maintenance' ? '设为维护中' : '恢复可用'
+    
+    try {
+        await ElMessageBox.confirm(
+            newStatus === 'maintenance' 
+                ? `确定要将"${venue.name}"设为维护中吗？系统将自动通知所有预约该场地的用户。` 
+                : `确定要将"${venue.name}"恢复为可用状态吗？`,
+            actionText,
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                type: 'warning'
+            }
+        )
+        
+        await api.put(`/venues/${venue.id}`, { ...venue, status: newStatus })
+        ElMessage.success(newStatus === 'maintenance' ? '已设为维护中，相关用户已收到通知' : '场地已恢复可用')
+        fetchVenues()
+    } catch (e) {
+        if (e !== 'cancel') {
+            ElMessage.error('操作失败')
+            console.error(e)
+        }
+    }
+}
+
 const handleDelete = async (venue) => {
     try {
         await ElMessageBox.confirm('确定要删除这个场馆吗？此操作不可恢复。', '警告', {
@@ -91,77 +146,128 @@ const handleDelete = async (venue) => {
 <template>
   <div>
     <div class="header-actions">
-
         <el-button type="primary" @click="openCreate" size="large">新增场馆</el-button>
     </div>
 
     <el-card shadow="never">
       <el-table :data="venues" style="width: 100%" size="large">
-        <el-table-column prop="id" label="编号" width="80" />
-        <el-table-column prop="name" label="场馆名称" />
-        <el-table-column prop="type" label="类型">
+        <el-table-column prop="id" label="编号" width="70" />
+        <el-table-column prop="name" label="场馆名称" width="150" />
+        <el-table-column prop="type" label="类型" width="100">
            <template #default="scope">
               <el-tag effect="plain">{{ { 'Classroom': '教室', 'Hall': '礼堂', 'Lab': '实验室' }[scope.row.type] || scope.row.type }}</el-tag>
            </template>
         </el-table-column>
-        <el-table-column prop="capacity" label="容纳人数" />
-        <el-table-column prop="location" label="位置" />
-        <el-table-column label="设施">
+        <el-table-column prop="capacity" label="容量" width="80" />
+        <el-table-column prop="location" label="位置" width="120" />
+        <el-table-column label="管理员" width="100">
+          <template #default="scope">
+            <el-tag v-if="scope.row.admin_id" type="info">{{ getAdminName(scope.row.admin_id) }}</el-tag>
+            <span v-else style="color: #999">未分配</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="设施" width="200">
           <template #default="scope">
              <el-tag v-for="f in scope.row.facilities" :key="f" size="small" style="margin-right:5px" type="info">{{ f }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态">
+        <el-table-column label="状态" width="100">
             <template #default="scope">
-                <el-tag :type="scope.row.status === 'available' ? 'success' : 'danger'" effect="dark">{{ scope.row.status === 'available' ? '可用' : '维护中' }}</el-tag>
+                <el-tag :type="scope.row.status === 'available' ? 'success' : 'danger'" effect="dark">
+                  {{ scope.row.status === 'available' ? '可用' : '维护中' }}
+                </el-tag>
             </template>
         </el-table-column>
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="scope">
               <el-button size="small" type="primary" plain @click="openEdit(scope.row)">编辑</el-button>
+              <el-button 
+                size="small" 
+                :type="scope.row.status === 'available' ? 'warning' : 'success'" 
+                plain 
+                @click="toggleStatus(scope.row)"
+              >
+                {{ scope.row.status === 'available' ? '维护' : '恢复' }}
+              </el-button>
               <el-button size="small" type="danger" plain @click="handleDelete(scope.row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="600px" class="glass-dialog">
-        <el-form :model="form">
-            <div class="form-pill">
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" class="glass-dialog">
+        <el-form :model="form" label-width="100px">
+            <el-row :gutter="20">
+              <el-col :span="12">
                 <el-form-item label="场馆名称">
                     <el-input v-model="form.name" placeholder="例如：由这里大讲堂" />
                 </el-form-item>
-            </div>
-            
-            <div class="form-pill">
+              </el-col>
+              <el-col :span="12">
                 <el-form-item label="场馆类型">
-                    <el-select v-model="form.type">
+                    <el-select v-model="form.type" style="width: 100%">
                         <el-option label="教室" value="Classroom" />
                         <el-option label="礼堂" value="Hall" />
                         <el-option label="实验室" value="Lab" />
                     </el-select>
                 </el-form-item>
-            </div>
+              </el-col>
+            </el-row>
 
-            <div class="form-pill">
-                 <el-form-item label="容纳人数">
-                    <el-input-number v-model="form.capacity" :min="1" />
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="容纳人数">
+                    <el-input-number v-model="form.capacity" :min="1" style="width: 100%" />
                 </el-form-item>
-            </div>
-
-            <div class="form-pill">
+              </el-col>
+              <el-col :span="12">
                 <el-form-item label="具体位置">
                     <el-input v-model="form.location" placeholder="例如：A栋 301" />
                 </el-form-item>
-            </div>
+              </el-col>
+            </el-row>
 
-            <div class="form-pill pill-stack">
-                <el-form-item label="配套设施" label-position="top">
-                    <el-checkbox-group v-model="form.facilities">
-                        <el-checkbox v-for="f in facilitiesOptions" :key="f" :label="f">{{ f }}</el-checkbox>
-                    </el-checkbox-group>
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="场地管理员">
+                    <el-select v-model="form.admin_id" placeholder="选择管理员" clearable style="width: 100%">
+                        <el-option 
+                          v-for="admin in venueAdmins" 
+                          :key="admin.id" 
+                          :label="admin.username" 
+                          :value="admin.id" 
+                        />
+                    </el-select>
                 </el-form-item>
-            </div>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="状态">
+                    <el-select v-model="form.status" style="width: 100%">
+                        <el-option label="可用" value="available" />
+                        <el-option label="维护中" value="maintenance" />
+                    </el-select>
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-form-item label="开放时间">
+                <el-input v-model="form.open_hours" placeholder="例如：周一至周五 8:00-22:00" />
+            </el-form-item>
+
+            <el-form-item label="场馆描述">
+                <el-input 
+                  v-model="form.description" 
+                  type="textarea" 
+                  :rows="3" 
+                  placeholder="场馆详细描述和使用说明" 
+                />
+            </el-form-item>
+
+            <el-form-item label="配套设施">
+                <el-checkbox-group v-model="form.facilities">
+                    <el-checkbox v-for="f in facilitiesOptions" :key="f" :label="f">{{ f }}</el-checkbox>
+                </el-checkbox-group>
+            </el-form-item>
         </el-form>
         <template #footer>
             <el-button @click="showModal = false">取消</el-button>

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '../../api/axios'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const myReservations = ref([])
 
@@ -18,11 +18,11 @@ onMounted(() => {
 
 const getStatusLabel = (status) => {
     const map = {
-        'pending': '审核中',
+        'pending': '待审核',
         'approved': '已通过',
         'rejected': '已驳回',
         'canceled': '已取消',
-        'completed': '已完成'
+        'used': '已使用'
     }
     return map[status] || status
 }
@@ -32,50 +32,289 @@ const getStatusType = (status) => {
         'pending': 'warning',
         'approved': 'success',
         'rejected': 'danger',
-        'canceled': 'info'
+        'canceled': 'info',
+        'used': ''
     }
     return map[status] || 'info'
+}
+
+// 判断是否可以取消预约
+const canCancel = (reservation) => {
+    // 只有待审核或已通过但未开始的预约可以取消
+    if (reservation.status === 'pending') return true
+    if (reservation.status === 'approved') {
+        const startTime = new Date(reservation.start_time)
+        return startTime > new Date() // 未开始
+    }
+    return false
+}
+
+// 取消预约
+const handleCancel = async (reservation) => {
+    try {
+        await ElMessageBox.confirm(
+            '确定要取消此预约吗？取消后将无法恢复。',
+            '取消预约',
+            {
+                confirmButtonText: '确认取消',
+                cancelButtonText: '返回',
+                type: 'warning'
+            }
+        )
+        
+        await api.put(`/reservations/${reservation.id}`, {
+            status: 'canceled',
+            rejection_reason: null
+        })
+        
+        ElMessage.success('预约已取消')
+        fetchMyReservations()
+    } catch (e) {
+        if (e !== 'cancel') {
+            ElMessage.error('取消失败')
+        }
+    }
+}
+
+// 查看详情
+const showDetailDialog = ref(false)
+const selectedReservation = ref(null)
+
+const openDetail = (reservation) => {
+    selectedReservation.value = reservation
+    showDetailDialog.value = true
+}
+
+const formatDateTime = (value) => {
+    if (!value) return ''
+    return new Date(value).toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    })
 }
 </script>
 
 <template>
   <div class="reservation-container">
-
+    <div class="page-header">
+        <h2>我的预约</h2>
+        <el-button type="primary" @click="fetchMyReservations">刷新</el-button>
+    </div>
 
     <div class="reservation-table-wrap">
       <el-table :data="myReservations" style="width: 100%" size="large">
-          <el-table-column prop="activity_name" label="活动名称" />
-          <el-table-column prop="organizer_unit" label="主办单位" />
-          <el-table-column prop="start_time" label="开始时间">
+          <el-table-column prop="activity_name" label="活动名称" min-width="150" />
+          <el-table-column prop="organizer_unit" label="主办单位" min-width="120" />
+          <el-table-column label="预约时间" min-width="200">
                 <template #default="scope">
-                    {{ new Date(scope.row.start_time).toLocaleString() }}
+                    <div class="time-range">
+                        <span>{{ formatDateTime(scope.row.start_time) }}</span>
+                        <span class="time-sep">至</span>
+                        <span>{{ formatDateTime(scope.row.end_time) }}</span>
+                    </div>
                 </template>
           </el-table-column>
-          <el-table-column prop="venue.name" label="场馆" />
-          <el-table-column prop="status" label="状态">
+          <el-table-column prop="attendees_count" label="人数" width="80" />
+          <el-table-column label="状态" width="140">
                 <template #default="scope">
-                  <el-tag :type="getStatusType(scope.row.status)" effect="dark">
-                    {{ getStatusLabel(scope.row.status) }}
-                  </el-tag>
+                    <div class="status-cell">
+                        <el-tag :type="getStatusType(scope.row.status)" effect="dark">
+                            {{ getStatusLabel(scope.row.status) }}
+                        </el-tag>
+                        <el-tooltip v-if="scope.row.status === 'rejected' && scope.row.rejection_reason" :content="scope.row.rejection_reason" placement="top">
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                    </div>
                 </template>
           </el-table-column>
-          <el-table-column prop="ai_risk_score" label="AI 风险评分">
+          <el-table-column label="AI评分" width="100">
              <template #default="scope">
-                <span v-if="scope.row.ai_risk_score !== null">{{ scope.row.ai_risk_score }} 分</span>
-                <span v-else class="text-gray">计算中...</span>
+                <el-tag v-if="scope.row.ai_risk_score !== null" 
+                    :type="scope.row.ai_risk_score > 70 ? 'danger' : scope.row.ai_risk_score > 30 ? 'warning' : 'success'"
+                    size="small">
+                    {{ scope.row.ai_risk_score }}分
+                </el-tag>
+                <span v-else class="text-gray">--</span>
              </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
+              <template #default="scope">
+                  <el-button size="small" type="primary" plain @click="openDetail(scope.row)">详情</el-button>
+                  <el-button 
+                      v-if="canCancel(scope.row)" 
+                      size="small" 
+                      type="danger" 
+                      plain 
+                      @click="handleCancel(scope.row)"
+                  >取消</el-button>
+              </template>
           </el-table-column>
       </el-table>
     </div>
+
+    <!-- 预约详情弹窗 -->
+    <el-dialog v-model="showDetailDialog" title="预约详情" width="500px" class="glass-dialog">
+        <div v-if="selectedReservation" class="detail-content">
+            <div class="detail-item">
+                <span class="label">活动名称</span>
+                <span class="value">{{ selectedReservation.activity_name }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="label">主办单位</span>
+                <span class="value">{{ selectedReservation.organizer_unit }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="label">负责人</span>
+                <span class="value">{{ selectedReservation.contact_name }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="label">联系电话</span>
+                <span class="value">{{ selectedReservation.contact_phone }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="label">预计人数</span>
+                <span class="value">{{ selectedReservation.attendees_count }} 人</span>
+            </div>
+            <div class="detail-item">
+                <span class="label">开始时间</span>
+                <span class="value">{{ formatDateTime(selectedReservation.start_time) }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="label">结束时间</span>
+                <span class="value">{{ formatDateTime(selectedReservation.end_time) }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="label">当前状态</span>
+                <el-tag :type="getStatusType(selectedReservation.status)" effect="dark">
+                    {{ getStatusLabel(selectedReservation.status) }}
+                </el-tag>
+            </div>
+            <div v-if="selectedReservation.status === 'rejected' && selectedReservation.rejection_reason" class="detail-item rejection">
+                <span class="label">驳回原因</span>
+                <span class="value rejection-text">{{ selectedReservation.rejection_reason }}</span>
+            </div>
+            <div class="detail-item full">
+                <span class="label">活动说明</span>
+                <div class="value proposal">{{ selectedReservation.proposal_content || '无' }}</div>
+            </div>
+            <div v-if="selectedReservation.ai_audit_comment" class="detail-item full">
+                <span class="label">AI审核意见</span>
+                <div class="value ai-comment">{{ selectedReservation.ai_audit_comment }}</div>
+            </div>
+        </div>
+        <template #footer>
+            <el-button @click="showDetailDialog = false">关闭</el-button>
+            <el-button v-if="selectedReservation && canCancel(selectedReservation)" type="danger" @click="showDetailDialog = false; handleCancel(selectedReservation)">
+                取消预约
+            </el-button>
+        </template>
+    </el-dialog>
   </div>
 </template>
+
+<script>
+import { InfoFilled } from '@element-plus/icons-vue'
+export default {
+    components: { InfoFilled }
+}
+</script>
 
 <style scoped>
 .reservation-container {
     padding: 0 40px;
     width: 100%;
 }
-.header-section {
-    margin-bottom: 30px;
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.page-header h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.time-range {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+}
+
+.time-sep {
+    color: #999;
+    font-size: 12px;
+}
+
+.status-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.info-icon {
+    color: #e6a23c;
+    cursor: pointer;
+}
+
+.text-gray {
+    color: #999;
+}
+
+/* 详情弹窗样式 */
+.detail-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.detail-item.full {
+    grid-column: span 2;
+}
+
+.detail-item.rejection {
+    grid-column: span 2;
+    background: #fef0f0;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.detail-item .label {
+    font-size: 12px;
+    color: #888;
+}
+
+.detail-item .value {
+    font-size: 14px;
+    color: #333;
+}
+
+.rejection-text {
+    color: #f56c6c !important;
+}
+
+.proposal, .ai-comment {
+    background: rgba(245, 245, 245, 0.5);
+    padding: 12px;
+    border-radius: 8px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.ai-comment {
+    background: rgba(64, 158, 255, 0.1);
 }
 </style>

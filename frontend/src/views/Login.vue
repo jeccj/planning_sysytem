@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
+import api from '../api/axios'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -15,6 +16,20 @@ const form = ref({
 
 const loading = ref(false)
 
+// 首次登录强制修改密码
+const showPasswordChangeDialog = ref(false)
+const passwordForm = ref({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+const passwordLoading = ref(false)
+
+// 公告确认弹窗
+const showAnnouncementDialog = ref(false)
+const latestAnnouncements = ref([])
+const pendingRedirect = ref(null)
+
 const handleLogin = async () => {
   // Basic validation
   if (!form.value.username || !form.value.password) {
@@ -25,21 +40,24 @@ const handleLogin = async () => {
   loading.value = true
   try {
     await authStore.login(form.value.username, form.value.password)
-    ElMessage.success('登录成功')
-
-    // Explicitly redirect based on role
-    if (authStore.isSysAdmin || authStore.isVenueAdmin) {
-      router.push('/admin/dashboard')
-    } else {
-      router.push('/student/dashboard')
+    
+    // 检查是否首次登录需要修改密码
+    if (authStore.user?.is_first_login) {
+      passwordForm.value.oldPassword = form.value.password
+      showPasswordChangeDialog.value = true
+      loading.value = false
+      return
     }
+    
+    // 获取公告并显示确认
+    await fetchAnnouncementsAndShow()
+    
   } catch (error) {
     console.error("Login failed:", error)
     let errorMessage = '登录失败，请稍后重试'
 
     if (error.response && error.response.data) {
       const detail = error.response.data.detail
-      // Handle the case where detail might be an object (FastAPI validation error structure)
       if (typeof detail === 'string') {
         errorMessage = `登录失败: ${detail}`
       } else if (Array.isArray(detail)) {
@@ -55,6 +73,87 @@ const handleLogin = async () => {
   }
 }
 
+const handlePasswordChange = async () => {
+  if (!passwordForm.value.newPassword || !passwordForm.value.confirmPassword) {
+    ElMessage.warning('请输入新密码')
+    return
+  }
+  
+  if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
+    ElMessage.warning('两次输入的密码不一致')
+    return
+  }
+  
+  if (passwordForm.value.newPassword.length < 6) {
+    ElMessage.warning('密码长度至少6位')
+    return
+  }
+  
+  passwordLoading.value = true
+  try {
+    await api.post('/auth/change-password', {
+      old_password: passwordForm.value.oldPassword,
+      new_password: passwordForm.value.newPassword
+    })
+    
+    ElMessage.success('密码修改成功')
+    showPasswordChangeDialog.value = false
+    
+    // 更新用户信息
+    const userRes = await api.get('/users/me')
+    authStore.user = userRes.data
+    localStorage.setItem('user', JSON.stringify(userRes.data))
+    
+    // 获取公告并显示确认
+    await fetchAnnouncementsAndShow()
+    
+  } catch (error) {
+    ElMessage.error('密码修改失败')
+  } finally {
+    passwordLoading.value = false
+  }
+}
+
+const fetchAnnouncementsAndShow = async () => {
+  try {
+    const res = await api.get('/announcements/')
+    latestAnnouncements.value = res.data.slice(0, 3) // 显示最新3条
+    
+    // 确定重定向路径
+    if (authStore.isSysAdmin || authStore.isVenueAdmin) {
+      pendingRedirect.value = '/admin/dashboard'
+    } else {
+      pendingRedirect.value = '/student/dashboard'
+    }
+    
+    if (latestAnnouncements.value.length > 0) {
+      showAnnouncementDialog.value = true
+    } else {
+      // 没有公告直接跳转
+      ElMessage.success('登录成功')
+      router.push(pendingRedirect.value)
+    }
+  } catch (e) {
+    // 获取公告失败也直接跳转
+    ElMessage.success('登录成功')
+    if (authStore.isSysAdmin || authStore.isVenueAdmin) {
+      router.push('/admin/dashboard')
+    } else {
+      router.push('/student/dashboard')
+    }
+  }
+}
+
+const confirmAnnouncement = () => {
+  showAnnouncementDialog.value = false
+  ElMessage.success('登录成功')
+  router.push(pendingRedirect.value)
+}
+
+const formatTime = (value) => {
+  if (!value) return ''
+  return new Date(value).toLocaleString()
+}
 </script>
 
 <template>
@@ -87,6 +186,69 @@ const handleLogin = async () => {
       </el-form>
 
     </el-card>
+
+    <!-- 首次登录强制修改密码弹窗 -->
+    <el-dialog 
+      v-model="showPasswordChangeDialog" 
+      title="首次登录请修改密码" 
+      width="400px" 
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      class="glass-dialog"
+    >
+      <div class="password-change-hint">
+        <el-alert type="warning" :closable="false" show-icon>
+          为了账户安全，首次登录需要修改初始密码
+        </el-alert>
+      </div>
+      <el-form :model="passwordForm" label-position="top" style="margin-top: 20px;">
+        <el-form-item label="新密码">
+          <el-input 
+            v-model="passwordForm.newPassword" 
+            type="password" 
+            placeholder="请输入新密码（至少6位）" 
+            show-password
+          />
+        </el-form-item>
+        <el-form-item label="确认新密码">
+          <el-input 
+            v-model="passwordForm.confirmPassword" 
+            type="password" 
+            placeholder="再次输入新密码" 
+            show-password
+            @keyup.enter="handlePasswordChange"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button type="primary" :loading="passwordLoading" @click="handlePasswordChange">
+          确认修改
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 公告确认弹窗 -->
+    <el-dialog 
+      v-model="showAnnouncementDialog" 
+      title="系统公告" 
+      width="500px"
+      :close-on-click-modal="false"
+      class="glass-dialog announcement-dialog"
+    >
+      <div class="announcement-list">
+        <div v-for="item in latestAnnouncements" :key="item.id" class="announcement-item">
+          <div class="announcement-title">{{ item.title }}</div>
+          <div class="announcement-time">{{ formatTime(item.publish_time) }}</div>
+          <div class="announcement-content">{{ item.content }}</div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="confirmAnnouncement">
+          我已阅读，进入系统
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -172,6 +334,46 @@ const handleLogin = async () => {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+/* 公告弹窗样式 */
+.announcement-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.announcement-item {
+  padding: 16px;
+  background: rgba(245, 245, 245, 0.5);
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+
+.announcement-item:last-child {
+  margin-bottom: 0;
+}
+
+.announcement-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: #1d1d1f;
+  margin-bottom: 4px;
+}
+
+.announcement-time {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+.announcement-content {
+  font-size: 14px;
+  color: #333;
+  line-height: 1.6;
+}
+
+.password-change-hint {
+  margin-bottom: 10px;
 }
 </style>
 

@@ -18,6 +18,7 @@ class ReservationStatus(str, enum.Enum):
     approved = "approved"
     rejected = "rejected"
     canceled = "canceled"
+    used = "used"  # 已使用
 
 class AnnouncementTargetRole(str, enum.Enum):
     all = "all"
@@ -48,6 +49,8 @@ class Venue(Base):
     facilities = Column(JSON) # e.g. ["Projector", "Audio"]
     status = Column(Enum(VenueStatus), default=VenueStatus.available)
     image_url = Column(String, nullable=True)
+    open_hours = Column(String, nullable=True)  # 开放时间，如 "08:00-22:00"
+    description = Column(Text, nullable=True)   # 场地详细描述
     admin_id = Column(Integer, ForeignKey("users.id"))
 
     admin = relationship("User", back_populates="venues_managed")
@@ -84,3 +87,17 @@ class Announcement(Base):
     content = Column(Text)
     publish_time = Column(DateTime, default=datetime.utcnow)
     target_role = Column(Enum(AnnouncementTargetRole), default=AnnouncementTargetRole.all)
+
+class Notification(Base):
+    """个人通知消息"""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    title = Column(String)
+    content = Column(Text)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    notification_type = Column(String, default="system")  # system, venue_change, reservation
+
+    user = relationship("User", backref="notifications")

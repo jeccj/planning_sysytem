@@ -131,10 +131,25 @@ body {
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1) !important;
 }
 
+/* Prevent table cell clipping on lifted buttons */
+.el-table__cell,
+.el-table .cell {
+    overflow: visible !important;
+}
+
 .el-button--primary {
     background: rgba(64, 82, 181, 0.25) !important;
     border: 1px solid rgba(64, 82, 181, 0.5) !important;
     color: var(--text-primary) !important;
+}
+
+.el-button--danger {
+    border: 1px solid rgba(245, 108, 108, 0.7) !important;
+}
+
+.el-button--danger:hover {
+    border-color: #f56c6c !important;
+    color: #f56c6c !important;
 }
 
 html.dark .el-button--primary {
