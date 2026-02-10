@@ -152,3 +152,53 @@ def search_venues(db: Session, capacity: int, start: datetime, end: datetime, fa
     print(f"[Search Debug] Candidates found: {len(scored_candidates)}")
     
     return [c[1] for c in scored_candidates]
+
+# --- Announcement CRUD ---
+def get_announcements(db: Session, skip: int = 0, limit: int = 100):
+    return (
+        db.query(models.Announcement)
+        .order_by(models.Announcement.publish_time.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def get_announcements_for_role(db: Session, role: models.UserRole, skip: int = 0, limit: int = 100):
+    if role == models.UserRole.sys_admin:
+        return get_announcements(db, skip=skip, limit=limit)
+
+    return (
+        db.query(models.Announcement)
+        .filter(
+            (models.Announcement.target_role == models.AnnouncementTargetRole.all)
+            | (models.Announcement.target_role == role)
+        )
+        .order_by(models.Announcement.publish_time.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+def create_announcement(db: Session, announcement: schemas.AnnouncementCreate):
+    db_announcement = models.Announcement(**announcement.model_dump())
+    db.add(db_announcement)
+    db.commit()
+    db.refresh(db_announcement)
+    return db_announcement
+
+def update_announcement(db: Session, announcement_id: int, announcement_data: schemas.AnnouncementUpdate):
+    announcement = db.query(models.Announcement).filter(models.Announcement.id == announcement_id).first()
+    if announcement:
+        update_fields = announcement_data.model_dump(exclude_unset=True)
+        for key, value in update_fields.items():
+            setattr(announcement, key, value)
+        db.commit()
+        db.refresh(announcement)
+    return announcement
+
+def delete_announcement(db: Session, announcement_id: int):
+    announcement = db.query(models.Announcement).filter(models.Announcement.id == announcement_id).first()
+    if announcement:
+        db.delete(announcement)
+        db.commit()
+    return announcement

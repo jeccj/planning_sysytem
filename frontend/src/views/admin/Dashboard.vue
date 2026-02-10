@@ -1,8 +1,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Monitor, ChatSquare, User, DataAnalysis, Collection, Cpu, Mic, Close } from '@element-plus/icons-vue'
+
+const router = useRouter()
 
 const stats = ref({
   totalVenues: 0,
@@ -18,6 +21,7 @@ const stats = ref({
 })
 
 const loading = ref(true)
+const latestAnnouncement = ref(null)
 
 const fetchDashboardData = async () => {
   try {
@@ -69,7 +73,10 @@ const fetchDashboardData = async () => {
   }
 }
 
-onMounted(() => fetchDashboardData())
+onMounted(() => {
+    fetchDashboardData()
+    fetchLatestAnnouncement()
+})
 
 const handleDeleteActivity = async (id) => {
     try {
@@ -96,6 +103,32 @@ const getStatusLabel = (status) => {
         'canceled': '已取消'
     }
     return map[status] || status
+}
+
+const fetchLatestAnnouncement = async () => {
+    try {
+        const res = await api.get('/announcements/latest')
+        latestAnnouncement.value = res.data
+    } catch (e) {
+        if (e?.response?.status !== 404) {
+            ElMessage.error('获取公告失败')
+        }
+        latestAnnouncement.value = null
+    }
+}
+
+const formatTime = (value) => {
+    if (!value) return ''
+    return new Date(value).toLocaleString()
+}
+
+const getNoticePreview = (text) => {
+    if (!text) return ''
+    return text.length > 80 ? `${text.slice(0, 80)}...` : text
+}
+
+const goToAnnouncements = () => {
+    router.push('/announcements')
 }
 </script>
 
@@ -184,6 +217,20 @@ const getStatusLabel = (status) => {
         </div>
 
         <div class="right-col">
+            <el-card class="glass-panel notice-panel" shadow="never" @click="goToAnnouncements">
+                <template #header>
+                    <div class="panel-header">
+                        <span>最新公告</span>
+                        <el-tag size="small" effect="plain" round>查看历史</el-tag>
+                    </div>
+                </template>
+                <div v-if="latestAnnouncement" class="notice-body">
+                    <div class="notice-title">{{ latestAnnouncement.title }}</div>
+                    <div class="notice-time">{{ formatTime(latestAnnouncement.publish_time) }}</div>
+                    <div class="notice-preview">{{ getNoticePreview(latestAnnouncement.content) }}</div>
+                </div>
+                <el-empty v-else description="暂无公告" :image-size="60" />
+            </el-card>
             <el-card class="glass-panel" shadow="never" style="height: 100%">
                 <template #header>
                      <div class="panel-header">
@@ -311,6 +358,41 @@ const getStatusLabel = (status) => {
     grid-template-columns: 1fr 1.5fr;
     gap: 24px;
     align-items: start;
+}
+
+.notice-panel {
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    margin-bottom: 16px;
+}
+
+.notice-panel:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.12);
+}
+
+.notice-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.notice-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: #1d1d1f;
+}
+
+.notice-time {
+    font-size: 12px;
+    color: #888;
+}
+
+.notice-preview {
+    font-size: 13px;
+    color: #1d1d1f;
+    opacity: 0.75;
+    line-height: 1.5;
 }
 
 /* Glass Panel helper for Cards - MATCHING SIDEBAR */
@@ -483,6 +565,11 @@ html.dark .action-btn {
 }
 
 html.dark .label, html.dark .value, html.dark .panel-header, html.dark .bd-header, html.dark .act-title, html.dark .act-meta {
+    color: #eee;
+}
+
+html.dark .notice-title,
+html.dark .notice-preview {
     color: #eee;
 }
 </style>

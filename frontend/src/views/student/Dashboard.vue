@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import SmartSearch from '../../components/SmartSearch.vue'
 import api from '../../api/axios'
@@ -9,9 +10,11 @@ import GlassDatePicker from '../../components/GlassDatePicker.vue'
 import VenueCard from '../../components/VenueCard.vue'
 
 const authStore = useAuthStore()
+const router = useRouter()
 const activeTab = ref('browse')
 const venues = ref([])
 const allVenues = ref([])
+const latestAnnouncement = ref(null)
 
 const fetchAllVenues = async () => {
     try {
@@ -24,7 +27,10 @@ const handleTabClick = (tab) => {
     if (tab.paneName === 'browse') fetchAllVenues()
 }
 
-onMounted(() => fetchAllVenues())
+onMounted(() => {
+    fetchAllVenues()
+    fetchLatestAnnouncement()
+})
 
 // Natural Language Booking Logic
 const parsedIntent = ref({})
@@ -272,10 +278,50 @@ const submitBooking = async () => {
         ElMessage.error("失败，请检查冲突")
     }
 }
+
+const fetchLatestAnnouncement = async () => {
+    try {
+        const res = await api.get('/announcements/latest')
+        latestAnnouncement.value = res.data
+    } catch (e) {
+        if (e?.response?.status !== 404) {
+            ElMessage.error('获取公告失败')
+        }
+        latestAnnouncement.value = null
+    }
+}
+
+const formatTime = (value) => {
+    if (!value) return ''
+    return new Date(value).toLocaleString()
+}
+
+const getNoticePreview = (text) => {
+    if (!text) return ''
+    return text.length > 80 ? `${text.slice(0, 80)}...` : text
+}
+
+const goToAnnouncements = () => {
+    router.push('/announcements')
+}
 </script>
 
 <template>
   <div class="dashboard-container">
+    <el-card class="glass-panel notice-panel" shadow="never" @click="goToAnnouncements">
+        <template #header>
+            <div class="panel-header">
+                <span>最新公告</span>
+                <el-tag size="small" effect="plain" round>查看历史</el-tag>
+            </div>
+        </template>
+        <div v-if="latestAnnouncement" class="notice-body">
+            <div class="notice-title">{{ latestAnnouncement.title }}</div>
+            <div class="notice-time">{{ formatTime(latestAnnouncement.publish_time) }}</div>
+            <div class="notice-preview">{{ getNoticePreview(latestAnnouncement.content) }}</div>
+        </div>
+        <el-empty v-else description="暂无公告" :image-size="60" />
+    </el-card>
     <!-- RESTORED: Functional Tabbed System -->
     <el-tabs v-model="activeTab" class="glass-tabs" @tab-click="handleTabClick">
         <el-tab-pane label="智能搜索" name="search">
@@ -373,6 +419,47 @@ const submitBooking = async () => {
     padding: 0 40px; /* Healthy h-padding but no max-width */
     width: 100%;
 }
+
+.notice-panel {
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    margin-bottom: 24px;
+    border-radius: 30px !important;
+    background: rgba(255, 255, 255, 0.4) !important;
+    backdrop-filter: blur(50px) saturate(160%);
+    -webkit-backdrop-filter: blur(50px) saturate(160%);
+    border: none !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05);
+}
+
+.notice-panel:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.12);
+}
+
+.notice-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.notice-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: #1d1d1f;
+}
+
+.notice-time {
+    font-size: 12px;
+    color: #888;
+}
+
+.notice-preview {
+    font-size: 13px;
+    color: #1d1d1f;
+    opacity: 0.75;
+    line-height: 1.5;
+}
 .results-grid {
     display: flex;
     flex-direction: column;
@@ -420,6 +507,9 @@ const submitBooking = async () => {
 @media (max-width: 768px) {
     .dashboard-container {
         padding: 0 16px;
+    }
+    .notice-panel {
+        margin-bottom: 16px;
     }
     .results-grid {
         margin-top: 20px;

@@ -8,6 +8,8 @@ const StudentDashboard = () => import('../views/student/Dashboard.vue')
 const AdminDashboard = () => import('../views/admin/Dashboard.vue')
 const VenueManagement = () => import('../views/admin/VenueManagement.vue')
 const AdminAudit = () => import('../views/AdminAudit.vue') // Moving to admin folder later ideally
+const AnnouncementManagement = () => import('../views/admin/AnnouncementManagement.vue')
+const Announcements = () => import('../views/Announcements.vue')
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -43,6 +45,12 @@ const router = createRouter({
                     component: () => import('../views/student/Reservations.vue'),
                     meta: { roles: ['student_teacher'] }
                 },
+                {
+                    path: 'announcements',
+                    name: 'announcements',
+                    component: Announcements,
+                    meta: { roles: ['student_teacher', 'venue_admin', 'sys_admin'] }
+                },
                 // Admin Routes
                 {
                     path: 'admin/dashboard',
@@ -66,6 +74,12 @@ const router = createRouter({
                     path: 'admin/users',
                     name: 'admin-users',
                     component: () => import('../views/admin/UserManagement.vue'),
+                    meta: { roles: ['sys_admin'] }
+                },
+                {
+                    path: 'admin/announcements',
+                    name: 'admin-announcements',
+                    component: AnnouncementManagement,
                     meta: { roles: ['sys_admin'] }
                 }
             ]

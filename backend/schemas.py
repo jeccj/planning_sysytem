@@ -92,6 +92,11 @@ class AnnouncementBase(BaseModel):
 class AnnouncementCreate(AnnouncementBase):
     pass
 
+class AnnouncementUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    target_role: Optional[AnnouncementTargetRole] = None
+
 class AnnouncementResponse(AnnouncementBase):
     id: int
     publish_time: datetime

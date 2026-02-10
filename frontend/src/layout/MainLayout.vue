@@ -24,22 +24,21 @@ const activeMenu = computed(() => route.path)
 const userRole = computed(() => authStore.user?.role)
 
 const showNotice = ref(false)
+const latestAnnouncement = ref(null)
 const showChangePwd = ref(false)
 const pwdForm = ref({ old_password: '', new_password: '', confirm_password: '' })
 
 onMounted(() => {
-    // Show notice if not shown in this session
-    if (!sessionStorage.getItem('noticeShown')) {
-        showNotice.value = true
-    }
-    
     // Check for first login
     if (authStore.user?.is_first_login) {
         showChangePwd.value = true
     }
-    
+
     // Check API Status
     checkApiStatus()
+
+    // Load latest announcement
+    fetchLatestAnnouncement()
 })
 
 const apiStatus = ref('loading') // 'connected', 'error', 'loading'
@@ -64,6 +63,8 @@ const pageTitle = computed(() => {
     if (p.includes('/admin/venues')) return '场馆管理'
     if (p.includes('/admin/audit')) return '预约审核'
     if (p.includes('/admin/users')) return '用户管理'
+    if (p.includes('/admin/announcements')) return '公告管理'
+    if (p.includes('/announcements')) return '公告中心'
     if (p.includes('/student/dashboard')) return '场馆查询'
     if (p.includes('/student/reservations')) return '我的预约'
     return '控制台'
@@ -71,7 +72,29 @@ const pageTitle = computed(() => {
 
 const handleNoticeConfirm = () => {
     showNotice.value = false
-    sessionStorage.setItem('noticeShown', 'true')
+    if (latestAnnouncement.value?.id) {
+        sessionStorage.setItem('noticeShownId', String(latestAnnouncement.value.id))
+    }
+}
+
+const formatTime = (value) => {
+    if (!value) return ''
+    return new Date(value).toLocaleString()
+}
+
+const fetchLatestAnnouncement = async () => {
+    try {
+        const res = await api.get('/announcements/latest')
+        latestAnnouncement.value = res.data
+        const shownId = sessionStorage.getItem('noticeShownId')
+        if (!shownId || shownId !== String(res.data.id)) {
+            showNotice.value = true
+        }
+    } catch (e) {
+        if (e?.response?.status !== 404) {
+            console.error('公告获取失败', e)
+        }
+    }
 }
 
 const handleSubmitPwd = async () => {
@@ -171,6 +194,11 @@ const handleLogout = () => {
               <el-icon><User /></el-icon>
               <span>用户权限管理</span>
             </el-menu-item>
+
+                        <el-menu-item index="/admin/announcements" v-if="userRole === 'sys_admin'">
+                            <el-icon><IconMenu /></el-icon>
+                            <span>公告管理</span>
+                        </el-menu-item>
           </template>
           
           </el-menu>
@@ -231,14 +259,13 @@ const handleLogout = () => {
     </el-container>
 
     <!-- Notice Dialog -->
-    <el-dialog v-model="showNotice" title="系统公告" width="500px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false">
-        <div style="line-height: 1.6;">
-            <h3>欢迎使用校园场馆预约系统</h3>
-            <p>1. 请遵守场馆使用规定，爱护公物。</p>
-            <p>2. 预约需提前至少1天申请。</p>
-            <p>3. 首次登录请务必修改默认密码。</p>
-            <p>4. 违规使用将被取消预约资格。</p>
+    <el-dialog v-model="showNotice" title="系统公告" width="520px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false">
+        <div v-if="latestAnnouncement" class="notice-body">
+            <h3 class="notice-title">{{ latestAnnouncement.title }}</h3>
+            <div class="notice-time">发布时间：{{ formatTime(latestAnnouncement.publish_time) }}</div>
+            <div class="notice-content">{{ latestAnnouncement.content }}</div>
         </div>
+        <div v-else class="notice-empty">暂无公告</div>
         <template #footer>
             <el-button type="primary" @click="handleNoticeConfirm" class="w-100">我已阅读并同意</el-button>
         </template>
@@ -269,6 +296,31 @@ const handleLogout = () => {
 .layout-container {
   height: 100vh;
   background-color: transparent; /* Let body gradient show through */
+}
+
+.notice-body {
+    line-height: 1.7;
+}
+
+.notice-title {
+    margin: 0 0 6px 0;
+    font-size: 18px;
+}
+
+.notice-time {
+    color: #888;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+.notice-content {
+    white-space: pre-wrap;
+}
+
+.notice-empty {
+    color: #999;
+    text-align: center;
+    padding: 24px 0;
 }
 
 /* Floating Sidebar Logic */
