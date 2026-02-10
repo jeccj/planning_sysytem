@@ -1,0 +1,34 @@
+# Campus Venue Reservation System
+
+- [x] Project Scaffolding <!-- id: 0 -->
+    - [x] Create directory structure for backend and frontend <!-- id: 1 -->
+    - [x] Create specific implementation plan <!-- id: 2 -->
+- [/] Backend Implementation <!-- id: 3 -->
+    - [x] Setup `requirements.txt` and install dependencies <!-- id: 4 -->
+    - [x] Implement `database.py` and `models.py` (SQLAlchemy) <!-- id: 5 -->
+    - [x] Implement `schemas.py` and `auth.py` (Pydantic, JWT) <!-- id: 6 -->
+    - [x] Implement `llm_service.py` (AI Logic with Mock Mode) <!-- id: 7 -->
+    - [x] Implement CRUD operations in `crud.py` <!-- id: 8 -->
+    - [x] Implement Routers (`users`, `venues`, `reservations`, `auth`) <!-- id: 9 -->
+    - [x] Implement `main.py` entry point <!-- id: 10 -->
+    - [x] Create database seeding script <!-- id: 11 -->
+- [/] Frontend Implementation <!-- id: 12 -->
+    - [x] Scaffold Vue 3 + Vite project <!-- id: 13 -->
+    - [x] Install Element Plus, Axios, Pinia, Vue Router <!-- id: 14 -->
+    - [/] Setup API wrapper and Stores <!-- id: 15 -->
+    - [x] Create Auth Views (Login, Change Password) <!-- id: 16 -->
+    - [x] Create Student Views (Smart Search, Booking, Dashboard) <!-- id: 17 -->
+    - [x] Create Admin Views (Venue Mgmt, AI Audit Panel) <!-- id: 18 -->
+- [x] Verification and Polish <!-- id: 19 -->
+    - [x] Test Backend API endpoints <!-- id: 20 -->
+    - [x] Test Frontend flows <!-- id: 21 -->
+    - [x] Verify AI mock integration <!-- id: 22 -->
+- [/] Refinement and Basics <!-- id: 23 -->
+    - [x] Create MainLayout with Navigation <!-- id: 24 -->
+    - [x] Implement Venue Management (Admin CRUD) <!-- id: 25 -->
+    - [x] Split Student and Admin Dashboards <!-- id: 26 -->
+    - [x] Improve Booking Flow and Feedback <!-- id: 27 -->
+- [x] UI Polish & Localization <!-- id: 28 -->
+    - [x] Implementation of Dark Mode (System Sync) <!-- id: 29 -->
+    - [x] Localization of all specific Views (CN) <!-- id: 30 -->
+    - [x] Material Design Styling Enhancements <!-- id: 31 -->

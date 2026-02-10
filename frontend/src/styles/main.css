@@ -1,0 +1,374 @@
+:root {
+    --el-color-primary: #4052b5;
+    --el-color-primary-light-3: #7986cb;
+    --el-color-primary-dark-2: #303f9f;
+    --bg-color: #f2f4f7;
+
+    /* UNIFIED GLASS TEXTURE (Sidebar Style) */
+    --glass-bg: rgba(230, 230, 230, 0.4);
+    --glass-blur: 50px;
+    --glass-border: 1px solid rgba(255, 255, 255, 0.5);
+    --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+
+    --text-primary: #1d1d1f;
+    --text-regular: #444446;
+    --glass-button: rgba(255, 255, 255, 0.25);
+    --glass-input-bg: rgba(255, 255, 255, 0.3);
+}
+
+html.dark {
+    --bg-color: #000000;
+    --glass-shadow: 0 20px 80px rgba(0, 0, 0, 0.08);
+    /* More diffused shadow */
+    --text-primary: #ffffff;
+    --text-regular: #ebebee;
+    --glass-button: rgba(255, 255, 255, 0.05);
+    --glass-input-bg: rgba(255, 255, 255, 0.03);
+}
+
+body {
+    background-color: var(--bg-color);
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* --- THE ISLAND UI: FLOATING HEADERS --- */
+.el-dialog.glass-dialog .el-dialog__header {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+    border: none !important;
+    /* Zero Divider Header */
+    border-radius: 40px;
+    margin: 0 auto 25px auto !important;
+    padding: 12px 30px !important;
+    width: fit-content !important;
+    min-width: 180px;
+    text-align: center;
+    box-shadow: var(--glass-shadow);
+    z-index: 1000;
+}
+
+.el-dialog__title {
+    font-weight: 800 !important;
+    font-size: 18px !important;
+    color: var(--text-primary) !important;
+    letter-spacing: 0.5px;
+}
+
+/* --- THE PILL STACK SYSTEM (No common substrate) --- */
+.el-dialog.glass-dialog {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.el-dialog.glass-dialog .el-dialog__body {
+    background: transparent !important;
+    padding: 10px 20px !important;
+}
+
+.form-pill {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: none !important;
+    /* No pill border */
+    border-radius: 40px;
+    padding: 2px 25px;
+    margin-bottom: 12px;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    min-height: 56px;
+    box-shadow: var(--glass-shadow);
+}
+
+.form-pill .el-form-item {
+    margin-bottom: 0 !important;
+    width: 100%;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+}
+
+.form-pill .el-form-item__label {
+    flex: 0 0 100px !important;
+    width: 100px !important;
+    color: var(--text-primary) !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
+    padding-right: 15px !important;
+}
+
+.form-pill .el-form-item__content {
+    flex: 1 !important;
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    overflow: hidden !important;
+}
+
+/* --- CLEAN GLASS BUTTONS --- */
+.el-button {
+    border-radius: 25px !important;
+    backdrop-filter: blur(20px) !important;
+    border: var(--glass-border) !important;
+    font-weight: 700 !important;
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+    background: var(--glass-button) !important;
+    color: var(--text-primary) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+}
+
+.el-button:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.4) !important;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1) !important;
+}
+
+.el-button--primary {
+    background: rgba(64, 82, 181, 0.25) !important;
+    border: 1px solid rgba(64, 82, 181, 0.5) !important;
+    color: var(--text-primary) !important;
+}
+
+html.dark .el-button--primary {
+    color: white !important;
+}
+
+/* GEOMETRIC CIRCLE NUMERIC CONTROLS */
+.el-input-number__decrease,
+.el-input-number__increase {
+    position: static !important;
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    border-radius: 50% !important;
+    background: var(--glass-button) !important;
+    border: none !important;
+    /* Circle controls no border */
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    color: var(--el-color-primary) !important;
+}
+
+/* GLOBAL GLASS SYSTEM: CARDS & TABS */
+.el-card,
+.glass-card,
+.glass-panel-heavy {
+    background: rgba(255, 255, 255, 0.05) !important;
+    /* Extremely subtle */
+    backdrop-filter: blur(30px) saturate(160%) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(160%) !important;
+    border: none !important;
+    border-radius: 30px !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05) !important;
+    /* Softened */
+}
+
+.el-tabs__content {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}
+
+.el-tabs__nav-wrap::after {
+    display: none !important;
+}
+
+.el-tabs__nav-scroll {
+    display: flex;
+    justify-content: center;
+    overflow: visible !important;
+}
+
+.el-tabs__nav {
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(25px) saturate(160%);
+    border: none !important;
+    border-radius: 40px;
+    padding: 6px !important;
+    display: inline-flex !important;
+    float: none !important;
+    box-shadow: none !important;
+    /* NO SHADOW: Avoid box effect */
+}
+
+.el-tabs__active-bar {
+    display: none !important;
+    /* Hide bar, use pill background instead */
+}
+
+.el-tabs__item {
+    font-weight: 700 !important;
+    color: var(--text-primary) !important;
+    padding: 0 30px !important;
+    height: 48px !important;
+    line-height: 48px !important;
+    transition: all 0.3s cubic-bezier(0.2, 0, 0, 1) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+.el-tabs__item.is-active {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border-radius: 35px !important;
+    font-weight: 800 !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+}
+
+html.dark .el-tabs__item.is-active {
+    background: rgba(255, 255, 255, 0.9) !important;
+}
+
+.el-tabs__item:hover:not(.is-active) {
+    color: var(--el-color-primary) !important;
+    transform: scale(1.05);
+}
+
+/* --- CLEAN GLASS INPUTS (Zero Divider & High Readability) --- */
+.el-input__wrapper,
+.el-textarea__inner {
+    background: rgba(255, 255, 255, 0.12) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    border-radius: 20px !important;
+    box-shadow: none !important;
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+}
+
+.el-input__wrapper:focus-within,
+.el-textarea__inner:focus {
+    background: rgba(255, 255, 255, 0.22) !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.1) !important;
+}
+
+.el-input__inner {
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+}
+
+.el-input__inner::placeholder,
+.el-textarea__inner::placeholder {
+    color: var(--text-primary);
+    opacity: 0.45;
+}
+
+/* Table Reset */
+.el-table,
+.el-table tr,
+.el-table td,
+.el-table th,
+.el-table__header,
+.el-table__body,
+.el-table__footer,
+.el-table__fixed,
+.el-table__fixed-right {
+    background-color: transparent !important;
+    background: transparent !important;
+    border: none !important;
+    border-color: transparent !important;
+}
+
+/* Hard Kill on any Element Plus border line */
+[class*='el-table']::before,
+[class*='el-table']::after,
+[class*='el-table']__inner-wrapper::before,
+[class*='el-table']__inner-wrapper::after,
+.el-table__cell,
+.el-table th.is-leaf,
+.el-table td.el-table__cell {
+    border: none !important;
+}
+
+.reservation-table-wrap.glass-panel-heavy {
+    padding: 30px !important;
+    margin-top: 20px !important;
+}
+
+/* Overlay blur */
+.el-overlay {
+    backdrop-filter: blur(12px);
+    background: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* --- GLASS NOTIFICATIONS & DIALOGS --- */
+.el-message,
+.el-notification {
+    background: rgba(255, 255, 255, 0.35) !important;
+    backdrop-filter: blur(40px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15) !important;
+    border-radius: 40px !important;
+    padding: 16px 32px !important;
+}
+
+.el-message .el-message__content,
+.el-notification .el-notification__title,
+.el-notification .el-notification__content {
+    color: #1d1d1f !important;
+    font-weight: 600 !important;
+}
+
+.el-message--success .el-message__content {
+    color: #67c23a !important;
+}
+
+.el-message--warning .el-message__content {
+    color: #e6a23c !important;
+}
+
+.el-message--error .el-message__content {
+    color: #f56c6c !important;
+}
+
+/* Glass Message Box (Alert/Confirm) */
+.el-message-box {
+    background: rgba(240, 240, 240, 0.6) !important;
+    backdrop-filter: blur(50px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(50px) saturate(180%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    border-radius: 30px !important;
+    box-shadow: 0 40px 80px rgba(0, 0, 0, 0.2) !important;
+    --el-message-box-title-color: #1d1d1f;
+}
+
+/* Dark Mode Overrides */
+html.dark .el-message,
+html.dark .el-notification,
+html.dark .el-message-box {
+    background: rgba(40, 40, 45, 0.5) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4) !important;
+}
+
+html.dark .el-message .el-message__content,
+html.dark .el-notification .el-notification__title,
+html.dark .el-notification .el-notification__content,
+html.dark .el-message-box__title,
+html.dark .el-message-box__message {
+    color: #eee !important;
+}
+
+/* Picker Actions Island */
+.el-dialog__footer {
+    display: flex;
+    justify-content: center;
+    padding: 10px 0 30px 0 !important;
+}
+
+.el-dialog__footer .el-button {
+    height: 48px !important;
+    border-radius: 24px !important;
+    padding: 0 40px !important;
+}
