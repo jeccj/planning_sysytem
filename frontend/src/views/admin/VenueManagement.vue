@@ -149,7 +149,7 @@ const handleDelete = async (venue) => {
         <el-button type="primary" @click="openCreate" size="large">新增场馆</el-button>
     </div>
 
-    <el-card shadow="never">
+    <el-card shadow="never" class="desktop-table">
       <el-table :data="venues" style="width: 100%" size="large">
         <el-table-column prop="id" label="编号" width="70" />
         <el-table-column prop="name" label="场馆名称" width="150" />
@@ -194,6 +194,49 @@ const handleDelete = async (venue) => {
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- Mobile Cards -->
+    <div class="mobile-cards">
+      <el-card v-for="venue in venues" :key="venue.id" class="venue-card" shadow="hover">
+        <div class="card-header">
+          <h3>{{ venue.name }}</h3>
+          <el-tag :type="venue.status === 'available' ? 'success' : 'danger'" effect="dark" size="small">
+            {{ venue.status === 'available' ? '可用' : '维护中' }}
+          </el-tag>
+        </div>
+        <div class="card-body">
+          <div class="info-row">
+            <span class="label">类型:</span>
+            <el-tag effect="plain" size="small">{{ { 'Classroom': '教室', 'Hall': '礼堂', 'Lab': '实验室' }[venue.type] }}</el-tag>
+          </div>
+          <div class="info-row">
+            <span class="label">容量:</span>
+            <span>{{ venue.capacity }}人</span>
+          </div>
+          <div class="info-row">
+            <span class="label">位置:</span>
+            <span>{{ venue.location }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">管理员:</span>
+            <span>{{ getAdminName(venue.admin_id) }}</span>
+          </div>
+          <div v-if="venue.facilities.length > 0" class="info-row">
+            <span class="label">设施:</span>
+            <div class="tags-wrap">
+              <el-tag v-for="f in venue.facilities" :key="f" size="small" type="info">{{ f }}</el-tag>
+            </div>
+          </div>
+        </div>
+        <div class="card-actions">
+          <el-button size="small" type="primary" plain @click="openEdit(venue)">编辑</el-button>
+          <el-button size="small" :type="venue.status === 'available' ? 'warning' : 'success'" plain @click="toggleStatus(venue)">
+            {{ venue.status === 'available' ? '维护' : '恢复' }}
+          </el-button>
+          <el-button size="small" type="danger" plain @click="handleDelete(venue)">删除</el-button>
+        </div>
+      </el-card>
+    </div>
 
     <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" class="glass-dialog">
         <el-form :model="form" label-width="100px">
@@ -283,5 +326,85 @@ const handleDelete = async (venue) => {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+}
+
+/* Desktop: show table */
+@media (min-width: 769px) {
+    .mobile-cards { display: none; }
+}
+
+/* Mobile: show cards */
+@media (max-width: 768px) {
+    .desktop-table { 
+        display: none !important; 
+    }
+    
+    .mobile-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .venue-card {
+        border-radius: 12px;
+        transition: all 0.2s;
+    }
+    
+    .venue-card:active {
+        transform: scale(0.98);
+    }
+    
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #ebeef5;
+    }
+    
+    .card-header h3 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+    }
+    
+    .card-body {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+    }
+    
+    .info-row {
+        display: flex;
+        align-items: center;
+        font-size: 13px;
+    }
+    
+    .info-row .label {
+        font-weight: 500;
+        color: #909399;
+        min-width: 55px;
+        margin-right: 6px;
+    }
+    
+    .tags-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    
+    .card-actions {
+        display: flex;
+        gap: 6px;
+        padding-top: 10px;
+        border-top: 1px solid #ebeef5;
+    }
+    
+    .card-actions el-button {
+        flex: 1;
+        font-size: 12px;
+    }
 }
 </style>

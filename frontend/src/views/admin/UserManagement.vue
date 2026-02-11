@@ -208,6 +208,35 @@ const submitCreate = async () => {
             </el-table>
         </el-card>
 
+        <!-- Mobile Cards -->
+        <div class="mobile-cards">
+            <el-card v-for="user in users" :key="user.id" class="user-card" shadow="hover">
+                <div class="card-header">
+                    <h3>{{ user.username }}</h3>
+                    <el-tag :type="getRoleType(user.role)">{{ getRoleLabel(user.role) }}</el-tag>
+                </div>
+                <div class="card-body">
+                    <div class="info-row">
+                        <span class="label">ID:</span>
+                        <span>{{ user.id }}</span>
+                    </div>
+                    <div v-if="user.role === 'venue_admin'" class="info-row">
+                        <span class="label">管辖:</span>
+                        <span>{{ getManagedVenues(user.id) }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">状态:</span>
+                        <el-tag v-if="user.is_first_login" type="warning" size="small">首次登录</el-tag>
+                        <el-tag v-else type="success" size="small">正常</el-tag>
+                    </div>
+                </div>
+                <div class="card-actions">
+                    <el-button size="small" type="primary" plain :icon="Edit" @click="openEdit(user)">编辑</el-button>
+                    <el-button size="small" type="info" plain :icon="Message" @click="openNotify(user)">通知</el-button>
+                </div>
+            </el-card>
+        </div>
+
         <!-- 编辑用户弹窗 -->
         <el-dialog v-model="showModal" title="编辑用户" width="500px" class="glass-dialog">
             <el-form :model="editForm" label-width="80px">
@@ -299,5 +328,70 @@ const submitCreate = async () => {
 
 .text-gray {
     color: #999;
+}
+
+@media (min-width: 769px) {
+    .mobile-cards { display: none; }
+}
+
+@media (max-width: 768px) {
+    el-card:has(el-table) { display: none !important; }
+    
+    .mobile-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .user-card {
+        border-radius: 12px;
+    }
+    
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #ebeef5;
+    }
+    
+    .card-header h3 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+    }
+    
+    .card-body {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+    }
+    
+    .info-row {
+        display: flex;
+        align-items: center;
+        font-size: 13px;
+    }
+    
+    .info-row .label {
+        font-weight: 500;
+        color: #909399;
+        min-width: 50px;
+        margin-right: 6px;
+    }
+    
+    .card-actions {
+        display: flex;
+        gap: 6px;
+        padding-top: 10px;
+        border-top: 1px solid #ebeef5;
+    }
+    
+    .card-actions el-button {
+        flex: 1;
+        font-size: 12px;
+    }
 }
 </style>

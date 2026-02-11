@@ -223,12 +223,12 @@ const handleLogout = () => {
 
             <el-menu-item index="/student/dashboard">
               <el-icon><House /></el-icon>
-              <span>场馆查询</span>
+              <span>查询</span>
             </el-menu-item>
             
             <el-menu-item index="/student/reservations">
               <el-icon><CircleCheck /></el-icon>
-              <span>我的预约</span>
+              <span>预约</span>
             </el-menu-item>
           </template>
 
@@ -236,27 +236,27 @@ const handleLogout = () => {
           <template v-if="['venue_admin', 'sys_admin'].includes(userRole)">
              <el-menu-item index="/admin/dashboard">
               <el-icon><House /></el-icon>
-              <span>系统概览</span>
+              <span>概览</span>
             </el-menu-item>
 
              <el-menu-item index="/admin/venues">
               <el-icon><Setting /></el-icon>
-              <span>场馆状态管理</span>
+              <span>设置</span>
             </el-menu-item>
 
              <el-menu-item index="/admin/audit">
               <el-icon><CircleCheck /></el-icon>
-              <span>预约申请审核</span>
+              <span>审核</span>
             </el-menu-item>
 
              <el-menu-item index="/admin/users" v-if="userRole === 'sys_admin'">
               <el-icon><User /></el-icon>
-              <span>用户权限管理</span>
+              <span>用户</span>
             </el-menu-item>
 
                         <el-menu-item index="/admin/announcements" v-if="userRole === 'sys_admin'">
                             <el-icon><IconMenu /></el-icon>
-                            <span>公告管理</span>
+                            <span>公告</span>
                         </el-menu-item>
           </template>
           
@@ -416,24 +416,25 @@ const handleLogout = () => {
     padding: 24px 0;
 }
 
-/* Floating Sidebar Logic */
-/* VisionOS Sidebar Style (Vertical Tab Bar) */
-/* VisionOS Sidebar Style (Expandable Rail) */
+/* VisionOS Sidebar Style (Expandable Rail) - Enhanced */
 .aside-menu {
-  /* Heavier, premium glass material */
-  background: rgba(230, 230, 230, 0.4) !important;
-  backdrop-filter: blur(50px) saturate(160%);
-  -webkit-backdrop-filter: blur(50px) saturate(160%);
+  /* Premium Glass Material with Gradient */
+  background: linear-gradient(
+    180deg,
+    rgba(235, 235, 240, 0.45) 0%,
+    rgba(225, 225, 235, 0.4) 100%
+  ) !important;
+  backdrop-filter: blur(60px) saturate(170%);
+  -webkit-backdrop-filter: blur(60px) saturate(170%);
   
-  /* Very subtle border */
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  /* Refined Border */
+  border: 1px solid rgba(255, 255, 255, 0.55);
   
   /* Text Color */
   color: rgba(0, 0, 0, 0.85);
   
   display: flex;
   flex-direction: column;
-  /* align-items: center;  // Don't center flex column, let items expand */
   
   /* Floating & Fixed Center */
   position: fixed;
@@ -444,35 +445,68 @@ const handleLogout = () => {
   
   /* Auto Height based on content */
   height: auto;
-  min-height: 100px; /* Minimum reasonable height */
+  min-height: 100px;
   width: 80px; /* Base width (Collapsed) */
   border-radius: 40px;
   
-  /* Deep, soft shadow for dimension */
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+  /* Layered Shadow for Premium Depth */
+  box-shadow: 
+    0 12px 48px rgba(0, 0, 0, 0.1),
+    0 4px 16px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
   
-  padding: 16px 0; /* Tighter padding for auto height */
+  padding: 16px 0;
   box-sizing: border-box;
   
-  /* Smooth Expansion Transition - SYNCED SPRING */
-  transition: width 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s;
-  overflow: hidden; /* Hide text when collapsed */
-  z-index: 1000; /* Ensure sidebar is above */
+  /* Smooth Expansion Spring Transition */
+  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  overflow: hidden;
+  z-index: 1000;
 }
 
-/* HOVER STATE: EXPAND */
+/* HOVER STATE: EXPAND with Enhanced Glass */
 .aside-menu:hover {
     width: 240px; /* Expanded Width */
-    background: rgba(240, 240, 240, 0.65) !important; /* Slightly lighter on expand */
+    background: linear-gradient(
+      180deg,
+      rgba(245, 245, 250, 0.7) 0%,
+      rgba(235, 235, 245, 0.65) 100%
+    ) !important;
+    backdrop-filter: blur(70px) saturate(200%);
+    -webkit-backdrop-filter: blur(70px) saturate(200%);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    box-shadow: 
+      0 16px 64px rgba(0, 0, 0, 0.14),
+      0 6px 20px rgba(0, 0, 0, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7);
     align-items: flex-start; 
-    /* REMOVED SCALE TO PREVENT SHIFTING */
 }
 
 html.dark .aside-menu {
-  background: rgba(30, 30, 32, 0.45) !important;
+  background: linear-gradient(
+    180deg,
+    rgba(32, 32, 36, 0.5) 0%,
+    rgba(26, 26, 30, 0.45) 100%
+  ) !important;
   color: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 
+    0 12px 48px rgba(0, 0, 0, 0.35),
+    0 4px 16px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+html.dark .aside-menu:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(42, 42, 48, 0.75) 0%,
+    rgba(36, 36, 42, 0.7) 100%
+  ) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 
+    0 16px 64px rgba(0, 0, 0, 0.5),
+    0 6px 20px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .logo {
@@ -838,37 +872,36 @@ html.dark .page-title {
 }
 :deep(.el-menu-item) {
     margin: 8px 0;
-    /* Stadium Shape when collapsed (circle-ish) or Expanded (pill) */
-    border-radius: 30px; 
+    /* Stadium Shape: Circle when collapsed, Pill when expanded */
+    border-radius: 28px; 
     height: 56px;
-    /* Width will be controlled by parent alignment or explicit width */
     width: 56px; /* Default Collapsed Width */
     
-    padding: 0 !important; /* Remove standard padding */
-    transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); /* SYNCED SPRING */
+    padding: 0 !important;
+    transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); /* Smooth spring */
     
     color: inherit;
     font-size: 16px;
     font-weight: 500;
     
     display: flex;
-    justify-content: flex-start; /* Align content start, but padding pushes icon */
+    justify-content: flex-start;
     align-items: center;
     position: relative;
     overflow: hidden;
+    cursor: pointer;
     
     /* Center icon in collapsed mode */
     padding-left: 0 !important; 
 }
 
-/* Force centering when collapsed via specific padding/flex hacking or just width */
+/* Force centering when collapsed */
 :deep(.el-menu-item .el-icon) {
-    font-size: 25px; /* REFINED SIZE */
-    min-width: 56px; /* Icon takes full width of collapsed item */
+    font-size: 24px; /* Refined size */
+    min-width: 56px;
     text-align: center;
     margin: 0;
-    transition: transform 0.3s;
-    /* Absolute center in collapsed */
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -880,14 +913,14 @@ html.dark .page-title {
     width: 0;
     white-space: nowrap;
     transform: translateX(-10px);
-    transition: all 0.3s ease; /* Fast fade out */
+    transition: all 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
     display: inline-block;
 }
 
 /* EXPANDED STATE LOGIC */
 .aside-menu:hover :deep(.el-menu-item) {
     width: 100%; /* Fill the expanded container */
-    padding-left: 0 !important; /* Icon still at start */
+    padding-left: 0 !important;
     justify-content: flex-start;
 }
 
@@ -896,25 +929,37 @@ html.dark .page-title {
     opacity: 1;
     width: auto;
     transform: translateX(0);
-    margin-left: 4px; /* Space from icon */
-    transition: opacity 0.4s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.4s 0.1s; /* Delay slightly */
+    margin-left: 6px; /* Space from icon */
+    transition: opacity 0.4s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1), 
+                transform 0.4s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-/* Hover: Glassy Highlight */
+/* Hover: Glass Highlight */
 :deep(.el-menu-item:hover) {
-    background-color: rgba(255, 255, 255, 0.3) !important;
+    background-color: rgba(255, 255, 255, 0.25) !important;
+    transform: translateX(2px); /* Subtle slide */
 }
 
 .aside-menu:hover :deep(.el-menu-item:hover) {
-    background-color: rgba(255, 255, 255, 0.4) !important; /* Stronger highlight expanded */
+    background-color: rgba(255, 255, 255, 0.35) !important;
 }
 
-/* Active: White Pill */
+html.dark :deep(.el-menu-item:hover) {
+    background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+html.dark .aside-menu:hover :deep(.el-menu-item:hover) {
+    background-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+/* Active: Bright Pill */
 :deep(.el-menu-item.is-active) {
     background-color: #ffffff !important;
     color: #000000 !important;
     font-weight: 600;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 
+      0 4px 16px rgba(0, 0, 0, 0.12),
+      0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 html.dark :deep(.el-menu-item.is-active) {
@@ -946,49 +991,109 @@ html.dark :deep(.el-menu-item.is-active) {
     }
 }
 
-/* Mobile / Tablet Vertical - Standardized Sidebar Logic (Matching Landscape) */
+/* Mobile / Tablet Vertical - Enhanced Premium Design */
 @media (max-width: 768px) {
     .aside-menu {
-        bottom: 30px; /* Lower position for better placement */
+        bottom: 24px; /* Optimal placement for thumb reach */
         top: auto;
         left: 50%;
         transform: translateX(-50%) translateY(0);
         flex-direction: row;
         
-        /* Shrunk State Substrate - Matching Landscape Glass Effect */
-        width: max-content !important; /* FORCE COMPACT WIDTH */
+        /* Premium Glass Material - Enhanced */
+        width: max-content !important;
         height: 60px;
         min-height: 0;
         border-radius: 30px;
+        padding: 4px 12px !important;
         
-        padding: 8px 12px; /* Tighter padding like landscape */
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12); /* Match landscape shadow */
-        background: rgba(230, 230, 230, 0.4) !important; /* Match landscape background */
-        backdrop-filter: blur(50px) saturate(160%); /* Match landscape blur */
-        -webkit-backdrop-filter: blur(50px) saturate(160%);
+        padding: 10px 16px; /* More balanced padding */
+        
+        /* Layered Shadow for Depth */
+        box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.1),
+            0 2px 8px rgba(0, 0, 0, 0.05),
+            inset 0 1px 0 rgba(255, 255, 255, 0.5); /* Inner highlight */
+        
+        /* Enhanced Glass Effect with Gradient */
+        background: linear-gradient(
+            135deg,
+            rgba(240, 240, 245, 0.5) 0%,
+            rgba(230, 230, 240, 0.45) 100%
+        ) !important;
+        backdrop-filter: blur(60px) saturate(180%);
+        -webkit-backdrop-filter: blur(60px) saturate(180%);
+        
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        
         align-items: center; 
         justify-content: center;
         overflow: visible; 
-        transition: all 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
-        border: 1px solid rgba(255, 255, 255, 0.5);
+        transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
         z-index: 2200;
     }
 
-    /* ANIMATION LOGIC: Pill stays in place, elements expand APART from center */
-    .aside-menu:hover {
+    /* Dark Mode - Premium Glass */
+    html.dark .aside-menu {
+        background: linear-gradient(
+            135deg,
+            rgba(35, 35, 40, 0.6) 0%,
+            rgba(25, 25, 30, 0.55) 100%
+        ) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 2px 8px rgba(0, 0, 0, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+
+    /* HOVER/ACTIVE STATE: Elegant Expansion */
+    .aside-menu:hover,
+    .aside-menu:active {
         transform: translateX(-50%) translateY(0); 
-        height: 82px; /* Balanced height for larger elements */
+        height: 76px;
+        padding: 6px 16px !important;
         width: max-content !important; 
         min-width: 0 !important; 
-        background: rgba(240, 240, 240, 0.65) !important; 
-        backdrop-filter: blur(50px) saturate(160%);
-        -webkit-backdrop-filter: blur(50px) saturate(160%);
-        border-radius: 41px; 
+        
+        /* Lighter on expansion - matching desktop logic */
+        background: linear-gradient(
+            135deg,
+            rgba(248, 248, 252, 0.7) 0%,
+            rgba(240, 240, 248, 0.65) 100%
+        ) !important;
+        backdrop-filter: blur(70px) saturate(200%);
+        -webkit-backdrop-filter: blur(70px) saturate(200%);
+        
+        border-radius: 40px; 
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        
+        /* Enhanced shadow on expansion */
+        box-shadow: 
+            0 12px 48px rgba(0, 0, 0, 0.15),
+            0 4px 12px rgba(0, 0, 0, 0.08),
+            inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        
         align-items: center !important; 
         justify-content: center;
-        padding: 8px 16px; 
-        transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); 
+        padding: 8px 24px; 
+        transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); /* Spring animation */
     }
+    
+    html.dark .aside-menu:hover,
+    html.dark .aside-menu:active {
+        background: linear-gradient(
+            135deg,
+            rgba(45, 45, 52, 0.75) 0%,
+            rgba(35, 35, 42, 0.7) 100%
+        ) !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 
+            0 12px 48px rgba(0, 0, 0, 0.5),
+            0 4px 12px rgba(0, 0, 0, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    }
+
 
     .el-menu-vertical {
         flex-direction: row;
@@ -997,109 +1102,207 @@ html.dark :deep(.el-menu-item.is-active) {
         background: transparent !important;
         height: 100%;
         align-items: center;
-        gap: 12px; /* ULTRA-TIGHT STARTING GAP */
+        gap: 8px;
         transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
         padding: 0;
     }
     
-    /* Expand gap and width follow on hover */
+    /* Expand gap on hover for breathing room */
     .aside-menu:hover .el-menu-vertical {
-        gap: 30px; /* TIGHTER EXPANDED GAP */
+        gap: 12px;
         align-items: center; 
         height: 100%;
     }
     
+    /* Menu Item - Vertical layout (icon top, label bottom) */
     :deep(.el-menu-item) {
         flex: none !important; 
-        width: 60px !important; 
-        min-width: auto !important;
-        height: 60px; /* FIXED HEIGHT FOR BALANCED CENTERING */
+        width: 52px !important;
+        min-width: 52px !important;
+        height: 52px;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        border-radius: 30px !important; 
+        border-radius: 26px !important; /* Perfect circle */
         background: transparent !important; 
         padding: 0 !important;
         margin: 0 !important;
-        transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); 
+        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
         position: relative;
         overflow: visible;
-        flex-shrink: 0; 
+        flex-shrink: 0;
+        cursor: pointer;
     }
     
-    /* Active State - Match Landscape */
-    :deep(.el-menu-item.is-active) {
-        background: rgba(255, 255, 255, 0.9) !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        font-weight: 600;
+    /* Hover: Expand horizontally to show label on right */
+    .aside-menu:hover :deep(.el-menu-item) {
+        width: auto !important;
+        min-width: 52px !important;
+        height: 52px !important;
+        padding-right: 10px !important;
+        border-radius: 26px !important;
+        flex-direction: row !important;
+        gap: 6px;
+        align-items: center;
     }
+    
+    /* Active State - Circle Background */
+    :deep(.el-menu-item.is-active) {
+        width: 52px !important;
+        height: 52px !important;
+        border-radius: 26px !important; /* Perfect circle */
+        background: rgba(255, 255, 255, 0.95) !important;
+        box-shadow: 
+            0 4px 16px rgba(0, 0, 0, 0.12),
+            0 2px 8px rgba(0, 0, 0, 0.08);
+        font-weight: 600;
+        color: #1d1d1f !important;
+    }
+    
     html.dark :deep(.el-menu-item.is-active) {
         background: rgba(255, 255, 255, 0.95) !important;
         color: #000 !important;
     }
     
-    /* Hover state - Spring Scale Effect */
+    /* Hover State - Subtle Glass Highlight */
     :deep(.el-menu-item:hover) {
-        background-color: rgba(255, 255, 255, 0.3) !important;
-        transform: scale(1.1); /* DYNAMIC SCALE */
+        background-color: rgba(255, 255, 255, 0.25) !important;
+        transform: scale(1.08); /* Gentle bounce */
     }
     
     .aside-menu:hover :deep(.el-menu-item:hover) {
-        background-color: rgba(255, 255, 255, 0.4) !important;
-        transform: scale(1.1);
+        background-color: rgba(255, 255, 255, 0.35) !important;
+        transform: scale(1.1); /* More pronounced in expanded state */
+    }
+    
+    html.dark :deep(.el-menu-item:hover) {
+        background-color: rgba(255, 255, 255, 0.15) !important;
+    }
+    
+    html.dark .aside-menu:hover :deep(.el-menu-item:hover) {
+        background-color: rgba(255, 255, 255, 0.2) !important;
     }
 
-    /* Icon anchored to center, shifts UP on hover */
+
+    /* Icon - Centered in circle */
     :deep(.el-menu-item .el-icon) {
         position: absolute;
         top: 50%;
-        left: 50%;
+        left: 26px;
         transform: translate(-50%, -50%);
-        transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-        font-size: 25px; /* REFINED SIZE (Synced) */
-        color: inherit;
+        font-size: 20px;
+        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        z-index: 2;
+        color: #1d1d1f;
+    }
+    
+    /* Icon on hover: stays in position but relative */
+    .aside-menu:hover :deep(.el-menu-item .el-icon) {
+        position: relative;
+        top: auto;
+        left: auto;
+        transform: none;
         flex-shrink: 0;
     }
 
-    .aside-menu:hover :deep(.el-menu-item .el-icon) {
-        transform: translate(-50%, -50%) translateY(-11px); /* Shift UP by 11px from center (prev 13px) */
-    }
 
-    /* Labels revealed BELOW icons - 12px DOWN from center - FLUID Transition */
+
+    /* Label - Hidden by default */
     :deep(.el-menu-item span) {
         opacity: 0;
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        /* Drift + Blur start */
-        transform: translate(-50%, -50%) translateY(5px) scale(0.8); 
-        filter: blur(4px);
-        transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); 
-        font-size: 13px; /* LARGER FONT */
-        font-weight: 600;
-        color: #1d1d1f;
+        width: 0;
+        overflow: hidden;
         white-space: nowrap;
-        text-align: center;
-        pointer-events: none;
+        font-size: 13px;
+        font-weight: 500;
+        color: #1d1d1f;
+        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        letter-spacing: 0.5px;
+        z-index: 1;
+        line-height: 1;
     }
-
+    
+    /* Label appears on right */
     .aside-menu:hover :deep(.el-menu-item span) {
         opacity: 1;
-        transform: translate(-50%, -50%) translateY(11px) scale(1); /* Final Pos */
-        filter: blur(0);
+        width: auto;
+        font-weight: 600;
     }
     
-    html.dark :deep(.el-menu-item span) { color: #fff; }
-
-    /* Standard Header Positions - UNIFIED VERTICAL ALIGNMENT */
-    .header-left { left: 20px; top: 16px; }
-    .header-right-container { right: 20px; top: 16px; }
-    .notification-container { right: 150px; top: 16px; }
-    .status-island { top: 16px; }
+    /* Dark mode label color */
+    html.dark :deep(.el-menu-item span) { 
+        color: #fff; 
+    }
     
+    /* Active state - ensure label is visible and styled correctly */
+    :deep(.el-menu-item.is-active .el-icon) {
+        color: #1d1d1f;
+    }
+    
+    html.dark :deep(.el-menu-item.is-active .el-icon) {
+        color: #000;
+    }
+    
+    /* Header Positioning - Mobile Optimized */
+    .header-left { 
+        left: 16px; 
+        top: 12px; 
+        font-size: 14px;
+    }
+    
+    .header-left .page-title {
+        font-size: 15px;
+        font-weight: 600;
+    }
+    
+    .header-right-container { 
+        right: 16px; 
+        top: 12px; 
+    }
+    
+    /* Hide notification bell on mobile to save space */
+    .notification-container { 
+        display: none !important;
+    }
+    
+    /* Simplify status island on mobile - just a dot */
+    .status-island { 
+        display: flex !important;
+        top: 20px !important;
+        padding: 0 !important;
+        width: auto !important;
+        min-width: 0 !important;
+        background: transparent !important;
+        backdrop-filter: none !important;
+        border: none !important;
+        box-shadow: none !important;
+        gap: 0 !important;
+    }
+    
+    .status-island .status-text {
+        display: none !important;
+    }
+    
+    .status-island .status-dot {
+        width: 10px !important;
+        height: 10px !important;
+    }
+    
+    /* User menu - smaller on mobile */
+    .header-right .username {
+        font-size: 13px;
+    }
+    
+    .header-right :deep(.el-avatar) {
+        width: 24px;
+        height: 24px;
+        font-size: 12px;
+    }
+    
+    /* Main content padding - MORE BOTTOM SPACE for tab bar */
     .main-content {
-        padding: 80px 16px 140px 16px; 
+        padding: 70px 16px 160px 16px !important; /* Increased bottom to 160px */
     }
 }
 </style>

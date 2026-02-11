@@ -100,7 +100,7 @@ const formatTime = (value) => {
       <el-button type="primary" size="large" @click="openCreate">发布公告</el-button>
     </div>
 
-    <el-card shadow="never">
+    <el-card shadow="never" class="desktop-table">
       <el-table :data="announcements" style="width: 100%" size="large">
         <el-table-column prop="id" label="编号" width="80" />
         <el-table-column prop="title" label="标题" min-width="220" />
@@ -124,6 +124,33 @@ const formatTime = (value) => {
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- Mobile Cards -->
+    <div class="mobile-cards">
+      <el-card v-for="item in announcements" :key="item.id" class="announcement-card" shadow="hover">
+        <div class="card-header">
+          <h3>{{ item.title }}</h3>
+          <el-tag effect="plain" size="small">
+            {{ targetRoleOptions.find(opt => opt.value === item.target_role)?.label }}
+          </el-tag>
+        </div>
+        <div class="card-body">
+          <div class="info-row">
+            <span class="label">ID:</span>
+            <span>{{ item.id }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">发布:</span>
+            <span>{{ formatTime(item.publish_time) }}</span>
+          </div>
+          <div class="content-preview">{{ item.content }}</div>
+        </div>
+        <div class="card-actions">
+          <el-button size="small" type="primary" plain @click="openEdit(item)">编辑</el-button>
+          <el-button size="small" type="danger" plain @click="handleDelete(item)">删除</el-button>
+        </div>
+      </el-card>
+    </div>
 
     <el-dialog v-model="showModal" :title="isEdit ? '编辑公告' : '发布公告'" width="700px" class="glass-dialog">
       <el-form :model="form">
@@ -174,5 +201,81 @@ const formatTime = (value) => {
 :deep(.el-table .cell),
 :deep(.el-table__cell) {
   overflow: visible;
+}
+
+@media (min-width: 769px) {
+  .mobile-cards { display: none; }
+}
+
+@media (max-width: 768px) {
+  .desktop-table { display: none !important; }
+  
+  .mobile-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .announcement-card {
+    border-radius: 12px;
+  }
+  
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #ebeef5;
+  }
+  
+  .card-header h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    flex: 1;
+    margin-right: 8px;
+  }
+  
+  .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  
+  .info-row {
+    display: flex;
+    font-size: 13px;
+  }
+  
+  .info-row .label {
+    font-weight: 500;
+    color: #909399;
+    min-width: 50px;
+    margin-right: 6px;
+  }
+  
+  .content-preview {
+    font-size: 13px;
+    color: #666;
+    line-height: 1.6;
+    margin-top: 6px;
+    padding: 8px;
+    background: #f5f7fa;
+    border-radius: 8px;
+  }
+  
+  .card-actions {
+    display: flex;
+    gap: 6px;
+    padding-top: 10px;
+    border-top: 1px solid #ebeef5;
+  }
+  
+  .card-actions el-button {
+    flex: 1;
+    font-size: 12px;
+  }
 }
 </style>
