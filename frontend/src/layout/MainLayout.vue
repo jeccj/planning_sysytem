@@ -46,6 +46,68 @@ const unreadNotificationCount = ref(0)
 const showNotificationPanel = ref(false)
 const notifications = ref([])
 let unreadCountTimer = null
+const showPhoneLandscapeMask = ref(false)
+const isViewportResizing = ref(false)
+let resizeIdleTimer = null
+const isBottomRail = ref(false)
+const isAsideExpanded = ref(false)
+
+const isPhoneDevice = () => {
+    if (typeof window === 'undefined') return false
+    const ua = navigator.userAgent || ''
+    const uaDataMobile = Boolean(navigator.userAgentData?.mobile)
+    const isTabletUa = /iPad|Tablet|PlayBook|Silk/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)
+    if (isTabletUa) return false
+    if (uaDataMobile) return true
+    if (/iPhone|iPod|Android.*Mobile|Windows Phone|Mobile/i.test(ua)) return true
+    const shortestEdge = Math.min(window.innerWidth || 0, window.innerHeight || 0)
+    const coarsePointer = window.matchMedia('(pointer: coarse)').matches
+    return coarsePointer && shortestEdge > 0 && shortestEdge < 700
+}
+
+const updatePhoneLandscapeMask = () => {
+    if (typeof window === 'undefined') return
+    const isLandscape = window.matchMedia('(orientation: landscape)').matches
+    showPhoneLandscapeMask.value = isPhoneDevice() && isLandscape
+}
+
+const updateRailMode = () => {
+    if (typeof window === 'undefined') return
+    const phone = isPhoneDevice()
+    const width = window.innerWidth
+    const height = window.innerHeight
+    const isSmallPhoneViewport = window.matchMedia('(max-width: 900px)').matches
+    const isPortrait = height > width
+    const isPcPortraitRail = !phone && isPortrait && width <= 1400
+    const isPcNarrowRail = !phone && width <= 900
+    isBottomRail.value = (phone && isSmallPhoneViewport) || isPcPortraitRail || isPcNarrowRail
+    if (isBottomRail.value) {
+        isAsideExpanded.value = true
+    } else {
+        isAsideExpanded.value = false
+    }
+}
+
+const handleViewportResize = () => {
+    updatePhoneLandscapeMask()
+    updateRailMode()
+    isViewportResizing.value = true
+    if (resizeIdleTimer) {
+        clearTimeout(resizeIdleTimer)
+    }
+    resizeIdleTimer = setTimeout(() => {
+        isViewportResizing.value = false
+        resizeIdleTimer = null
+    }, 140)
+}
+
+const handleAsideClick = (event) => {
+    const menuItem = event.target?.closest('.el-menu-item')
+    if (menuItem) return
+    if (!isBottomRail.value) {
+        isAsideExpanded.value = !isAsideExpanded.value
+    }
+}
 
 const fetchUnreadCount = async () => {
     try {
@@ -114,6 +176,10 @@ onMounted(() => {
     
     // 定时刷新未读通知数
     unreadCountTimer = setInterval(fetchUnreadCount, 60000) // 每分钟刷新一次
+
+    handleViewportResize()
+    window.addEventListener('resize', handleViewportResize, { passive: true })
+    window.addEventListener('orientationchange', handleViewportResize)
 })
 
 watch(
@@ -121,6 +187,9 @@ watch(
     () => {
         if (showLlmStatusIsland.value) {
             checkLlmStatus()
+        }
+        if (!isBottomRail.value) {
+            isAsideExpanded.value = false
         }
     }
 )
@@ -130,6 +199,12 @@ onUnmounted(() => {
         clearInterval(unreadCountTimer)
         unreadCountTimer = null
     }
+    if (resizeIdleTimer) {
+        clearTimeout(resizeIdleTimer)
+        resizeIdleTimer = null
+    }
+    window.removeEventListener('resize', handleViewportResize)
+    window.removeEventListener('orientationchange', handleViewportResize)
 })
 
 const llmStatus = ref('loading') // 'connected', 'error', 'loading'
@@ -255,9 +330,20 @@ const handleLogout = () => {
 </script>
 
 <template>
-  <div class="common-layout" @click="closeFloatingPanels">
+  <div class="common-layout" :class="{ 'is-resizing': isViewportResizing }" @click="closeFloatingPanels">
     <el-container class="layout-container">
-      <el-aside width="auto" :class="['aside-menu', { 'aside-menu--compact': userRole === 'student_teacher' }]">
+      <el-aside
+        width="auto"
+        :class="[
+          'aside-menu',
+          {
+            'aside-menu--bottom': isBottomRail,
+            'aside-menu--compact': userRole === 'student_teacher',
+            'aside-menu--expanded': isAsideExpanded
+          }
+        ]"
+        @click.stop="handleAsideClick"
+      >
         <div class="logo">
           <h3>校园场馆预约系统</h3>
         </div>
@@ -442,14 +528,27 @@ const handleLogout = () => {
             <el-button type="primary" @click="handleSubmitPwd" class="w-100">确认修改</el-button>
         </template>
     </el-dialog>
+
+    <transition name="mobile-mask-fade">
+      <div v-if="showPhoneLandscapeMask" class="mobile-orientation-mask" @touchmove.prevent>
+        <div class="mobile-orientation-card">
+          <div class="mobile-orientation-icon">↻</div>
+          <div class="mobile-orientation-title">请切换到竖屏</div>
+          <div class="mobile-orientation-text">当前是手机横屏模式。为保证触摸和排版体验，请竖屏使用。</div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <style scoped>
 .layout-container {
-  --rail-collapsed-width: 72px;
-  --rail-offset-left: 126px;
-  height: 100vh;
+  --rail-left-gap: clamp(12px, 1.8vw, 24px);
+  --rail-collapsed-width: clamp(60px, 5.4vw, 72px);
+  --rail-expanded-width: clamp(192px, 18vw, 236px);
+  --rail-item-size: clamp(46px, 4.3vw, 52px);
+  --rail-offset-left: calc(var(--rail-left-gap) + var(--rail-collapsed-width) + clamp(14px, 1.9vw, 30px));
+  height: 100dvh;
   background-color: transparent; /* Let body gradient show through */
 }
 
@@ -500,7 +599,7 @@ const handleLogout = () => {
   
   /* Floating & Fixed Center */
   position: fixed;
-  left: 24px;
+  left: var(--rail-left-gap);
   top: 50%;
   transform: translateY(-50%);
   margin: 0;
@@ -508,8 +607,8 @@ const handleLogout = () => {
   /* Auto Height based on content */
   height: auto;
   min-height: 100px;
-  width: 72px; /* Base width (Collapsed) */
-  border-radius: 36px;
+  width: var(--rail-collapsed-width); /* Base width (Collapsed) */
+  border-radius: calc(var(--rail-collapsed-width) / 2);
   
   /* Layered Shadow for Premium Depth */
   box-shadow: 
@@ -521,14 +620,20 @@ const handleLogout = () => {
   box-sizing: border-box;
   
   /* Smooth Expansion Spring Transition */
-  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    width 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.24s ease,
+    box-shadow 0.24s ease,
+    background 0.24s ease,
+    border-color 0.24s ease;
   overflow: hidden;
   z-index: 1000;
 }
 
 /* HOVER STATE: EXPAND with Enhanced Glass */
-.aside-menu:hover {
-    width: 220px; /* Expanded Width */
+.aside-menu:hover,
+.aside-menu.aside-menu--expanded {
+    width: var(--rail-expanded-width); /* Expanded Width */
     background: linear-gradient(
       180deg,
       rgba(246, 247, 252, 0.56) 0%,
@@ -558,7 +663,8 @@ html.dark .aside-menu {
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-html.dark .aside-menu:hover {
+html.dark .aside-menu:hover,
+html.dark .aside-menu.aside-menu--expanded {
   background: linear-gradient(
     180deg,
     rgba(40, 41, 48, 0.58) 0%,
@@ -569,6 +675,156 @@ html.dark .aside-menu:hover {
     0 16px 56px rgba(0, 0, 0, 0.45),
     0 6px 20px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Bottom rail mode: phone portrait + pc portrait narrow */
+.aside-menu.aside-menu--bottom {
+    bottom: 14px;
+    top: auto;
+    left: 50% !important;
+    right: auto !important;
+    margin: 0 !important;
+    transform: translateX(-50%) !important;
+    flex-direction: row;
+    width: min(clamp(240px, 58vw, 620px), calc(100% - 24px)) !important;
+    height: clamp(58px, 7.6vh, 68px);
+    min-height: clamp(58px, 7.6vh, 68px);
+    border-radius: 30px;
+    padding: 7px !important;
+    box-shadow:
+        0 12px 34px rgba(0, 0, 0, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.52);
+    background: linear-gradient(
+        150deg,
+        rgba(245, 247, 252, 0.54) 0%,
+        rgba(235, 238, 247, 0.46) 100%
+    ) !important;
+    backdrop-filter: blur(24px) saturate(145%);
+    -webkit-backdrop-filter: blur(24px) saturate(145%);
+    transition: transform 0.22s ease, box-shadow 0.22s ease, background 0.22s ease, border-color 0.22s ease;
+    will-change: transform;
+    z-index: 2200;
+    overflow: hidden;
+}
+
+.aside-menu.aside-menu--bottom.aside-menu--compact {
+    width: min(clamp(168px, 34vw, 320px), calc(100% - 130px)) !important;
+}
+
+.aside-menu.aside-menu--bottom:hover,
+.aside-menu.aside-menu--bottom.aside-menu--expanded {
+    width: min(clamp(240px, 58vw, 620px), calc(100% - 24px)) !important;
+    height: clamp(58px, 7.6vh, 68px);
+    min-height: clamp(58px, 7.6vh, 68px);
+    align-items: center !important;
+    transform: translateX(-50%) !important;
+}
+
+html.dark .aside-menu.aside-menu--bottom {
+    background: linear-gradient(
+        150deg,
+        rgba(35, 37, 43, 0.6) 0%,
+        rgba(29, 31, 36, 0.56) 100%
+    ) !important;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow:
+        0 12px 34px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+html.dark .aside-menu.aside-menu--bottom:hover,
+html.dark .aside-menu.aside-menu--bottom.aside-menu--expanded {
+    background: linear-gradient(
+        150deg,
+        rgba(35, 37, 43, 0.6) 0%,
+        rgba(29, 31, 36, 0.56) 100%
+    ) !important;
+    box-shadow:
+        0 12px 34px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.aside-menu.aside-menu--bottom .el-menu-vertical {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100% !important;
+    height: 100%;
+    align-items: stretch;
+    gap: 8px;
+    padding: 0;
+}
+
+.aside-menu.aside-menu--bottom :deep(.el-menu-item) {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    margin: 0 !important;
+    border-radius: 20px !important;
+    padding: 0 8px !important;
+    display: flex;
+    flex-direction: column !important;
+    justify-content: center;
+    align-items: center;
+    gap: 2px;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.aside-menu.aside-menu--bottom :deep(.el-menu-item .el-icon) {
+    position: static;
+    transform: none;
+    min-width: auto;
+    font-size: 17px;
+    line-height: 1;
+}
+
+.aside-menu.aside-menu--bottom :deep(.el-menu-item span) {
+    opacity: 1;
+    width: auto;
+    max-height: 20px;
+    transform: translateY(1px);
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: 0.15px;
+    margin: 0;
+    white-space: nowrap;
+    transition: opacity 0.2s ease;
+}
+
+.aside-menu.aside-menu--bottom :deep(.el-menu-item:hover) {
+    transform: none;
+    background-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+.aside-menu.aside-menu--bottom :deep(.el-menu-item.is-active) {
+    background: rgba(255, 255, 255, 0.94) !important;
+    color: #111 !important;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+    transform: none;
+}
+
+html.dark .aside-menu.aside-menu--bottom :deep(.el-menu-item) {
+    color: #f0f0f0;
+}
+
+html.dark .aside-menu.aside-menu--bottom :deep(.el-menu-item:hover) {
+    background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+html.dark .aside-menu.aside-menu--bottom :deep(.el-menu-item.is-active) {
+    background: rgba(255, 255, 255, 0.9) !important;
+    color: #111 !important;
+}
+
+.aside-menu.aside-menu--bottom + .el-container .main-content {
+    padding: 76px 12px 112px 12px !important;
+}
+
+.aside-menu.aside-menu--bottom + .el-container .content-shell {
+    min-height: calc(100dvh - 196px);
+    border-radius: 22px;
+    padding: 10px 4px 0;
 }
 
 .logo {
@@ -624,7 +880,13 @@ html.dark .status-text { color: #eee; }
 
 .aside-menu:hover .el-menu-vertical {
     align-items: stretch; /* Stretch items to fill width on expansion */
-    padding: 0 12px; /* Add internal padding when expanded */
+    padding: 0 clamp(8px, 1.1vw, 12px); /* Add internal padding when expanded */
+    box-sizing: border-box;
+}
+
+.aside-menu.aside-menu--expanded .el-menu-vertical {
+    align-items: stretch;
+    padding: 0 clamp(8px, 1.1vw, 12px);
     box-sizing: border-box;
 }
 
@@ -643,7 +905,7 @@ html.dark .status-text { color: #eee; }
 .header-left-group {
     position: fixed;
     top: 32px;
-    left: 126px;
+    left: var(--rail-offset-left);
     pointer-events: auto;
     z-index: 910;
     display: flex;
@@ -1011,16 +1273,97 @@ html.dark .page-title {
     letter-spacing: 0.2px;
 }
 
+.mobile-orientation-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    padding: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(8, 10, 16, 0.44);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+}
+
+.mobile-orientation-card {
+    width: min(320px, 100%);
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    background: rgba(255, 255, 255, 0.82);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2);
+    padding: 18px 16px;
+    text-align: center;
+}
+
+.mobile-orientation-icon {
+    width: 44px;
+    height: 44px;
+    margin: 0 auto 8px;
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: 700;
+    color: #1f2542;
+    background: rgba(64, 82, 181, 0.16);
+}
+
+.mobile-orientation-title {
+    font-size: 17px;
+    font-weight: 800;
+    color: #17191f;
+    margin-bottom: 6px;
+}
+
+.mobile-orientation-text {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #4a4f5d;
+}
+
+html.dark .mobile-orientation-card {
+    background: rgba(18, 21, 29, 0.86);
+    border-color: rgba(255, 255, 255, 0.22);
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.55);
+}
+
+html.dark .mobile-orientation-icon {
+    background: rgba(130, 145, 255, 0.2);
+    color: #d6dcff;
+}
+
+html.dark .mobile-orientation-title {
+    color: #f0f2f8;
+}
+
+html.dark .mobile-orientation-text {
+    color: #c8ccd8;
+}
+
+.mobile-mask-fade-enter-active,
+.mobile-mask-fade-leave-active {
+    transition: opacity 0.2s ease;
+}
+
+.mobile-mask-fade-enter-from,
+.mobile-mask-fade-leave-to {
+    opacity: 0;
+}
+
 .main-content {
   /* Offset content to align with floating header and fixed position */
   padding: 96px 28px 28px var(--rail-offset-left);
   overflow-y: auto;
   overflow-x: hidden;
-  height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
+  overscroll-behavior: contain;
 }
 
 .content-shell {
-    min-height: calc(100vh - 126px);
+    min-height: calc(100dvh - 126px);
     border-radius: 30px;
     padding: 18px 10px 4px;
     background: rgba(255, 255, 255, 0.2);
@@ -1062,14 +1405,19 @@ html.dark .content-shell {
     }
 }
 :deep(.el-menu-item) {
-    margin: 7px 0;
+    margin: clamp(5px, 0.7vw, 7px) 0;
     /* Stadium Shape: Circle when collapsed, Pill when expanded */
-    border-radius: 26px; 
-    height: 52px;
-    width: 52px; /* Default Collapsed Width */
+    border-radius: calc(var(--rail-item-size) / 2);
+    height: var(--rail-item-size);
+    width: var(--rail-item-size); /* Default Collapsed Width */
     
     padding: 0 !important;
-    transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); /* Smooth spring */
+    transition:
+        width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+        background-color 0.22s ease,
+        color 0.22s ease,
+        transform 0.22s ease,
+        box-shadow 0.22s ease;
     
     color: inherit;
     font-size: 16px;
@@ -1088,8 +1436,8 @@ html.dark .content-shell {
 
 /* Force centering when collapsed */
 :deep(.el-menu-item .el-icon) {
-    font-size: 22px; /* Refined size */
-    min-width: 52px;
+    font-size: clamp(19px, 1.9vw, 22px); /* Refined size */
+    min-width: var(--rail-item-size);
     text-align: center;
     margin: 0;
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -1115,6 +1463,12 @@ html.dark .content-shell {
     justify-content: flex-start;
 }
 
+.aside-menu.aside-menu--expanded :deep(.el-menu-item) {
+    width: 100%;
+    padding-left: 0 !important;
+    justify-content: flex-start;
+}
+
 /* Show Text on Hover */
 .aside-menu:hover :deep(.el-menu-item span) {
     opacity: 1;
@@ -1122,6 +1476,15 @@ html.dark .content-shell {
     transform: translateX(0);
     margin-left: 6px; /* Space from icon */
     transition: opacity 0.4s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1), 
+                transform 0.4s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.aside-menu.aside-menu--expanded :deep(.el-menu-item span) {
+    opacity: 1;
+    width: auto;
+    transform: translateX(0);
+    margin-left: 6px;
+    transition: opacity 0.4s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1),
                 transform 0.4s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -1173,11 +1536,11 @@ html.dark :deep(.el-menu-item.is-active) {
 
 /* --- RESPONSIVE BREAKPOINTS (ALL DEVICES) --- */
 @media (max-width: 1360px) {
-    .header-left-group { left: 112px; top: 24px; }
+    .header-left-group { top: 24px; }
     .status-island { top: 24px; }
     .header-right-container { top: 24px; right: 24px; }
-    .main-content { padding: 88px 20px 24px 104px; }
-    .content-shell { min-height: calc(100vh - 112px); padding: 16px 8px 2px; }
+    .main-content { padding: 88px 20px 24px var(--rail-offset-left); }
+    .content-shell { min-height: calc(100dvh - 112px); padding: 16px 8px 2px; }
 }
 
 @media (max-width: 1180px) {
@@ -1186,13 +1549,13 @@ html.dark :deep(.el-menu-item.is-active) {
 }
 
 @media (max-width: 980px) {
-    .header-left-group { left: 86px; max-width: calc(100vw - 196px); }
+    .header-left-group { max-width: calc(100vw - 196px); }
     .header-right-container { right: 18px; }
-    .main-content { padding: 84px 14px 20px 86px; }
+    .main-content { padding: 84px 14px 20px var(--rail-offset-left); }
 }
 
 @media (max-width: 860px) {
-    .header-left-group { left: 80px; max-width: calc(100vw - 188px); }
+    .header-left-group { max-width: calc(100vw - 188px); }
     .header-right-container { right: 14px; }
     .header-right {
         max-width: 148px;
@@ -1204,166 +1567,54 @@ html.dark :deep(.el-menu-item.is-active) {
         height: 100dvh;
     }
 
-    .aside-menu {
+    .aside-menu.aside-menu--bottom {
         bottom: 14px;
-        top: auto;
-        left: 50%;
-        transform: translateX(-50%);
-        flex-direction: row;
-        width: min(392px, calc(100% - 24px)) !important;
-        height: 58px;
-        min-height: 58px;
-        border-radius: 30px;
-        padding: 7px !important;
-        box-shadow:
-            0 12px 34px rgba(0, 0, 0, 0.16),
-            inset 0 1px 0 rgba(255, 255, 255, 0.52);
-        background: linear-gradient(
-            150deg,
-            rgba(245, 247, 252, 0.54) 0%,
-            rgba(235, 238, 247, 0.46) 100%
-        ) !important;
-        backdrop-filter: blur(36px) saturate(155%);
-        -webkit-backdrop-filter: blur(36px) saturate(155%);
-        transition: transform 0.3s ease, box-shadow 0.28s ease, background 0.28s ease, height 0.28s ease, width 0.28s ease;
-        will-change: width, height, box-shadow, background;
-        z-index: 2200;
-        overflow: hidden;
+        width: calc(100vw - 12px) !important;
+        max-width: calc(100vw - 12px) !important;
+        min-height: clamp(64px, 8.6vh, 74px);
+        height: clamp(64px, 8.6vh, 74px);
+        border-radius: 34px;
+        padding: 8px !important;
+        transform: translateX(-50%) !important;
     }
 
-    .aside-menu.aside-menu--compact {
-        width: min(180px, calc(100% - 192px)) !important;
+    .aside-menu.aside-menu--bottom.aside-menu--compact {
+        width: calc(100vw - 12px) !important;
+        max-width: calc(100vw - 12px) !important;
     }
 
-    .aside-menu.aside-menu--compact:hover {
-        width: min(226px, calc(100% - 146px)) !important;
+    .aside-menu.aside-menu--bottom:hover,
+    .aside-menu.aside-menu--bottom.aside-menu--expanded {
+        width: calc(100vw - 12px) !important;
+        max-width: calc(100vw - 12px) !important;
+        min-height: clamp(64px, 8.6vh, 74px);
+        height: clamp(64px, 8.6vh, 74px);
+        transform: translateX(-50%) !important;
     }
 
-    .aside-menu:hover {
-        width: min(392px, calc(100% - 24px)) !important;
-        height: 66px;
-        align-items: center !important;
-        transform: translateX(-50%) translateY(-2px);
-        background: linear-gradient(
-            150deg,
-            rgba(249, 250, 254, 0.66) 0%,
-            rgba(241, 243, 250, 0.58) 100%
-        ) !important;
-        box-shadow:
-            0 16px 42px rgba(0, 0, 0, 0.2),
-            inset 0 1px 0 rgba(255, 255, 255, 0.52);
+    .aside-menu.aside-menu--bottom :deep(.el-menu-item) {
+        border-radius: 22px !important;
+        padding: 0 10px !important;
+        gap: 3px;
     }
 
-    html.dark .aside-menu {
-        background: linear-gradient(
-            150deg,
-            rgba(35, 37, 43, 0.6) 0%,
-            rgba(29, 31, 36, 0.56) 100%
-        ) !important;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        box-shadow:
-            0 12px 34px rgba(0, 0, 0, 0.5),
-            inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    .aside-menu.aside-menu--bottom :deep(.el-menu-item .el-icon) {
+        font-size: clamp(18px, 5.2vw, 21px);
     }
 
-    html.dark .aside-menu:hover {
-        background: linear-gradient(
-            150deg,
-            rgba(43, 45, 52, 0.72) 0%,
-            rgba(36, 38, 44, 0.66) 100%
-        ) !important;
-        box-shadow:
-            0 16px 42px rgba(0, 0, 0, 0.54),
-            inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    .aside-menu.aside-menu--bottom :deep(.el-menu-item span) {
+        font-size: clamp(11px, 2.8vw, 12.5px);
     }
 
-    .el-menu-vertical {
-        flex-direction: row;
-        justify-content: space-between;
-        width: 100% !important;
-        height: 100%;
-        align-items: stretch;
-        gap: 8px;
-        padding: 0;
+    .aside-menu.aside-menu--bottom + .el-container .main-content {
+        padding: 62px 0 102px 0 !important;
     }
 
-    .aside-menu:hover .el-menu-vertical {
-        gap: 8px;
-    }
-
-    :deep(.el-menu-item),
-    .aside-menu:hover :deep(.el-menu-item) {
-        flex: 1 1 0 !important;
-        width: auto !important;
-        min-width: 0 !important;
-        height: 100% !important;
-        margin: 0 !important;
-        border-radius: 20px !important;
-        padding: 0 8px !important;
-        display: flex;
-        flex-direction: column !important;
-        justify-content: center;
-        align-items: center;
-        gap: 2px;
-        transition: background 0.24s ease, transform 0.24s ease, box-shadow 0.24s ease;
-    }
-
-    :deep(.el-menu-item .el-icon),
-    .aside-menu:hover :deep(.el-menu-item .el-icon) {
-        position: static;
-        transform: none;
-        min-width: auto;
-        font-size: 17px;
-        line-height: 1;
-    }
-
-    :deep(.el-menu-item span),
-    .aside-menu:hover :deep(.el-menu-item span) {
-        opacity: 0;
-        width: auto;
-        transform: none;
-        max-height: 0;
-        font-size: 10.5px;
-        font-weight: 600;
-        line-height: 1.1;
-        letter-spacing: 0.15px;
-        margin: 0;
-        transition: opacity 0.28s ease, max-height 0.28s ease, transform 0.28s ease;
-        overflow: hidden;
-    }
-
-    .aside-menu:hover :deep(.el-menu-item span) {
-        opacity: 1;
-        max-height: 20px;
-        transform: translateY(1px);
-        transition-delay: 0.05s;
-        white-space: nowrap;
-    }
-
-    :deep(.el-menu-item:hover),
-    .aside-menu:hover :deep(.el-menu-item:hover) {
-        transform: translateY(-1px);
-        background-color: rgba(255, 255, 255, 0.18) !important;
-    }
-
-    :deep(.el-menu-item.is-active) {
-        background: rgba(255, 255, 255, 0.94) !important;
-        color: #111 !important;
-        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
-        transform: translateY(-1px);
-    }
-
-    html.dark :deep(.el-menu-item) {
-        color: #f0f0f0;
-    }
-
-    html.dark :deep(.el-menu-item:hover) {
-        background-color: rgba(255, 255, 255, 0.12) !important;
-    }
-
-    html.dark :deep(.el-menu-item.is-active) {
-        background: rgba(255, 255, 255, 0.9) !important;
-        color: #111 !important;
+    .aside-menu.aside-menu--bottom + .el-container .content-shell {
+        min-height: calc(100dvh - 164px);
+        border-radius: 0;
+        padding: 10px 0 0;
+        background: rgba(255, 255, 255, 0.24);
     }
 
     .header-left-group {
@@ -1460,87 +1711,108 @@ html.dark :deep(.el-menu-item.is-active) {
         height: 9px !important;
     }
 
-    .main-content {
-        padding: 62px 10px 108px 10px !important;
-    }
-
-    .content-shell {
-        min-height: calc(100dvh - 184px);
-        border-radius: 22px;
-        padding: 10px 4px 0;
-        background: rgba(255, 255, 255, 0.24);
-    }
 }
 
 @media (max-height: 520px) and (orientation: landscape) and (max-width: 980px) {
-    .aside-menu {
-        bottom: 8px;
-        width: min(346px, calc(100% - 24px)) !important;
-        height: 50px;
-        min-height: 50px;
+    .aside-menu.aside-menu--bottom {
+        bottom: clamp(6px, 2.2vh, 12px);
+        width: min(clamp(210px, 66vw, 560px), calc(100% - 18px)) !important;
+        height: clamp(46px, 11.5vh, 58px);
+        min-height: clamp(46px, 11.5vh, 58px);
         padding: 5px !important;
     }
 
-    .aside-menu:hover {
-        width: min(352px, calc(100% - 20px)) !important;
-        height: 56px;
-        transform: translateX(calc(-50% + 2px)) translateY(-3px);
+    .aside-menu.aside-menu--bottom:hover,
+    .aside-menu.aside-menu--bottom.aside-menu--expanded {
+        width: min(clamp(210px, 66vw, 560px), calc(100% - 18px)) !important;
+        height: clamp(46px, 11.5vh, 58px);
+        min-height: clamp(46px, 11.5vh, 58px);
+        transform: translateX(-50%) !important;
     }
 
-    .aside-menu.aside-menu--compact {
-        width: min(170px, calc(100% - 220px)) !important;
+    .aside-menu.aside-menu--bottom.aside-menu--compact {
+        width: min(clamp(146px, 40vw, 260px), calc(100% - 126px)) !important;
     }
 
-    .aside-menu.aside-menu--compact:hover {
-        width: min(214px, calc(100% - 176px)) !important;
+    .aside-menu.aside-menu--bottom :deep(.el-menu-item .el-icon) {
+        font-size: clamp(14px, 3.2vw, 16px);
     }
 
-    :deep(.el-menu-item .el-icon),
-    .aside-menu:hover :deep(.el-menu-item .el-icon) {
-        font-size: 15px;
-    }
-
-    :deep(.el-menu-item span),
-    .aside-menu:hover :deep(.el-menu-item span) {
-        font-size: 9px;
-    }
-
-    .aside-menu:hover :deep(.el-menu-item span) {
-        font-size: 10px;
+    .aside-menu.aside-menu--bottom :deep(.el-menu-item span) {
+        font-size: clamp(9px, 2.1vw, 10.5px);
         white-space: nowrap;
     }
 }
 
-@media (max-width: 768px) and (hover: none), (max-width: 768px) and (pointer: coarse) {
-    .aside-menu,
-    .aside-menu:hover {
-        height: 58px !important;
-        min-height: 58px !important;
-        transform: translateX(-50%) !important;
+@media (max-width: 430px) {
+    .header-left-group {
+        max-width: calc(100vw - 130px);
     }
 
-    .aside-menu:hover {
-        width: min(392px, calc(100% - 24px)) !important;
-        box-shadow:
-            0 12px 34px rgba(0, 0, 0, 0.16),
-            inset 0 1px 0 rgba(255, 255, 255, 0.52) !important;
+    .header-left {
+        max-width: calc(100vw - 154px);
     }
 
-    .aside-menu.aside-menu--compact,
-    .aside-menu.aside-menu--compact:hover {
-        width: min(180px, calc(100% - 192px)) !important;
+    .header-right {
+        max-width: 128px;
+        padding: 7px 8px !important;
     }
 
-    .aside-menu:hover :deep(.el-menu-item span) {
-        opacity: 0;
-        max-height: 0;
-        transform: none;
-        transition-delay: 0s;
+    .header-right .username {
+        max-width: 62px;
+        font-size: 11.5px;
     }
 
-    :deep(.el-menu-item:hover),
-    .aside-menu:hover :deep(.el-menu-item:hover) {
-        transform: none;
+    .header-right .user-role-inline {
+        font-size: 9px;
     }
+
+    .main-content {
+        padding-left: 8px !important;
+        padding-right: 8px !important;
+    }
+
+    .content-shell {
+        border-radius: 18px;
+        padding: 8px 3px 0;
+    }
+}
+
+/* Resize guard: disable costly transitions during interactive viewport drag */
+.common-layout.is-resizing .aside-menu,
+.common-layout.is-resizing .header-left,
+.common-layout.is-resizing .header-right,
+.common-layout.is-resizing .status-island,
+.common-layout.is-resizing .content-shell {
+    transition: none !important;
+}
+
+.common-layout.is-resizing :deep(.el-menu-item),
+.common-layout.is-resizing :deep(.el-menu-item span),
+.common-layout.is-resizing :deep(.el-menu-item .el-icon) {
+    transition: none !important;
+}
+
+/* Bottom rail lock: keep labels visible and prevent desktop-rail hover rules from distorting layout */
+.aside-menu.aside-menu--bottom:hover .el-menu-vertical,
+.aside-menu.aside-menu--bottom.aside-menu--expanded .el-menu-vertical {
+    padding: 0 !important;
+    align-items: stretch !important;
+}
+
+.aside-menu.aside-menu--bottom:hover :deep(.el-menu-item),
+.aside-menu.aside-menu--bottom.aside-menu--expanded :deep(.el-menu-item) {
+    width: auto !important;
+    justify-content: center !important;
+    padding: 0 8px !important;
+    transform: none !important;
+}
+
+.aside-menu.aside-menu--bottom:hover :deep(.el-menu-item span),
+.aside-menu.aside-menu--bottom.aside-menu--expanded :deep(.el-menu-item span) {
+    opacity: 1 !important;
+    width: auto !important;
+    margin-left: 0 !important;
+    transform: translateY(1px) !important;
 }
 </style>

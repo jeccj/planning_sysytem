@@ -46,9 +46,14 @@ html.dark {
 body {
     background-color: var(--bg-color);
     margin: 0;
+    min-height: 100dvh;
     font-family: "Avenir Next", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
 }
 
 * {
@@ -56,7 +61,25 @@ body {
 }
 
 #app {
-    min-height: 100vh;
+    min-height: 100dvh;
+    height: 100dvh;
+    overflow: hidden;
+}
+
+/* Touch-first baseline: reduce ghost click delay and improve hit behavior */
+:where(
+    button,
+    [role='button'],
+    .el-button,
+    .el-menu-item,
+    .action-btn-circle,
+    .pill-button-trigger,
+    .menu-item,
+    .menu-notice-pill,
+    .glass-pill,
+    .el-dialog__headerbtn
+) {
+    touch-action: manipulation;
 }
 
 .app-page {
@@ -176,6 +199,39 @@ html.dark .admin-toolbar__meta {
 
     .app-title {
         font-size: 20px;
+    }
+
+    .admin-toolbar {
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .admin-toolbar__filters {
+        width: 100%;
+    }
+
+    .admin-toolbar :is(.el-input, .el-select) {
+        width: 100%;
+    }
+
+    .admin-toolbar .el-button {
+        min-height: 36px !important;
+    }
+
+    .app-page {
+        padding-bottom: var(--app-page-padding-bottom);
+    }
+
+    /* Prevent iOS zoom on focus */
+    :is(
+        input,
+        select,
+        textarea,
+        .el-input__inner,
+        .el-textarea__inner,
+        .el-select__placeholder
+    ) {
+        font-size: 16px !important;
     }
 }
 
@@ -802,6 +858,32 @@ html.dark .el-message-box__message {
     .dialog-fade-leave-to .el-dialog.glass-dialog {
         opacity: 0;
         transform: translate(-50%, calc(-50% + 22px)) scale(0.98) !important;
+    }
+}
+
+/* Coarse pointer tuning: no sticky hover transform, better tap feedback */
+@media (hover: none), (pointer: coarse) {
+    .el-button:hover,
+    .glass-pill:hover,
+    .menu-item:hover,
+    .menu-notice-pill:hover {
+        transform: none !important;
+    }
+
+    .el-tabs__item:hover:not(.is-active) {
+        transform: none !important;
+    }
+
+    .el-button,
+    .menu-item,
+    .menu-notice-pill {
+        min-height: 44px;
+    }
+
+    .el-button:active,
+    .menu-item:active,
+    .menu-notice-pill:active {
+        transform: scale(0.98);
     }
 }
 

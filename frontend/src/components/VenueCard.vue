@@ -226,6 +226,10 @@ defineEmits(['book', 'view-detail'])
     background: rgba(144, 147, 153, 1);
 }
 
+.action-btn-circle:active {
+    transform: scale(0.96);
+}
+
 /* Responsive Media Queries */
 @media (max-width: 768px) {
     .card-content-row {
@@ -270,6 +274,21 @@ defineEmits(['book', 'view-detail'])
     .venue-icon {
         width: 40px;
         height: 40px; /* Slightly smaller icon on mobile */
+    }
+}
+
+@media (hover: none), (pointer: coarse) {
+    .vibrant-glass-card:hover .card-glass-substrate {
+        background: rgba(255, 255, 255, 0.22);
+    }
+
+    .vibrant-glass-card:hover .action-btn-circle {
+        transform: none;
+        box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+    }
+
+    .view-btn:hover {
+        background: rgba(144, 147, 153, 0.8);
     }
 }
 

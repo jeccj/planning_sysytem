@@ -53,6 +53,23 @@ const filteredReservations = computed(() => {
     })
 })
 
+const hasActiveFilter = computed(() => {
+    return Boolean(keyword.value.trim()) || Boolean(filterStatus.value)
+})
+
+const statusSummary = computed(() => ([
+    { key: 'pending', label: '待审核', value: auditStats.value.pending },
+    { key: 'approved', label: '已通过', value: auditStats.value.approved },
+    { key: 'used', label: '已使用', value: auditStats.value.used },
+    { key: 'rejected', label: '已驳回', value: auditStats.value.rejected },
+    { key: 'canceled', label: '已取消', value: auditStats.value.canceled }
+]))
+
+const clearFilters = () => {
+    keyword.value = ''
+    filterStatus.value = ''
+}
+
 const handleDecision = async (id, status, reason = null) => {
     try {
         await api.put(`/reservations/${id}`, { status, rejection_reason: reason })
@@ -172,69 +189,87 @@ const formatDateTime = (value) => {
             </div>
         </div>
 
-        <div class="audit-card-list">
-            <el-card
-                v-for="item in filteredReservations"
-                :key="item.id"
-                class="audit-card app-panel"
-                shadow="never"
-            >
-                <div class="card-head">
-                    <div class="head-main">
-                        <h3 class="activity-name">{{ item.activity_name }}</h3>
-                        <p class="org-name">{{ item.organizer_unit || '未知单位' }}</p>
+        <div class="audit-content app-panel">
+            <div v-if="filteredReservations.length > 0" class="audit-card-list">
+                <el-card
+                    v-for="item in filteredReservations"
+                    :key="item.id"
+                    class="audit-card app-panel"
+                    shadow="never"
+                >
+                    <div class="card-head">
+                        <div class="head-main">
+                            <h3 class="activity-name">{{ item.activity_name }}</h3>
+                            <p class="org-name">{{ item.organizer_unit || '未知单位' }}</p>
+                        </div>
+                        <el-tag :type="getStatusType(item.status)">{{ getStatusLabel(item.status) }}</el-tag>
                     </div>
-                    <el-tag :type="getStatusType(item.status)">{{ getStatusLabel(item.status) }}</el-tag>
-                </div>
 
-                <div class="card-meta">
-                    <div class="meta-item">
-                        <span class="meta-label">开始</span>
-                        <span>{{ formatDateTime(item.start_time) }}</span>
+                    <div class="card-meta">
+                        <div class="meta-item">
+                            <span class="meta-label">开始</span>
+                            <span>{{ formatDateTime(item.start_time) }}</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">结束</span>
+                            <span>{{ formatDateTime(item.end_time) }}</span>
+                        </div>
                     </div>
-                    <div class="meta-item">
-                        <span class="meta-label">结束</span>
-                        <span>{{ formatDateTime(item.end_time) }}</span>
+
+                    <div class="card-section">
+                        <p class="section-title">提案内容</p>
+                        <p class="proposal-text">{{ item.proposal_content || '暂无提案内容' }}</p>
+                        <a v-if="item.proposal_url" :href="getProposalLink(item.proposal_url)" target="_blank" class="proposal-link">
+                            下载策划书
+                        </a>
+                    </div>
+
+                    <div class="card-section">
+                        <p class="section-title">AI 风险评估</p>
+                        <template v-if="item.ai_risk_score !== null">
+                            <el-tag :type="getRiskParams(item.ai_risk_score).type" effect="dark" size="small">
+                                {{ getRiskParams(item.ai_risk_score).label }} ({{ item.ai_risk_score }})
+                            </el-tag>
+                            <p class="audit-comment">AI 意见: {{ item.ai_audit_comment || '无' }}</p>
+                        </template>
+                        <el-tag v-else type="info" size="small">分析中...</el-tag>
+                    </div>
+
+                    <div class="card-actions">
+                        <template v-if="item.status === 'pending'">
+                            <el-button type="success" size="small" @click="handleDecision(item.id, 'approved')">通过</el-button>
+                            <el-button type="danger" size="small" @click="handleDecision(item.id, 'rejected', '不符合安全规定')">驳回</el-button>
+                        </template>
+                        <el-button v-if="canMarkUsed(item)" type="primary" size="small" @click="handleMarkUsed(item)">
+                            标记已使用
+                        </el-button>
+                        <el-button type="danger" size="small" plain @click="handleDelete(item.id)">删除</el-button>
+                    </div>
+                </el-card>
+            </div>
+            <div v-else class="audit-empty-layout">
+                <el-empty class="audit-empty" description="暂无待处理活动" :image-size="84" />
+                <div class="audit-empty-actions">
+                    <el-button size="small" @click="fetchReservations">刷新数据</el-button>
+                    <el-button v-if="hasActiveFilter" size="small" plain @click="clearFilters">清空筛选</el-button>
+                </div>
+                <div class="audit-status-grid">
+                    <div v-for="status in statusSummary" :key="status.key" class="audit-status-pill">
+                        <span>{{ status.label }}</span>
+                        <strong>{{ status.value }}</strong>
                     </div>
                 </div>
-
-                <div class="card-section">
-                    <p class="section-title">提案内容</p>
-                    <p class="proposal-text">{{ item.proposal_content || '暂无提案内容' }}</p>
-                    <a v-if="item.proposal_url" :href="getProposalLink(item.proposal_url)" target="_blank" class="proposal-link">
-                        下载策划书
-                    </a>
-                </div>
-
-                <div class="card-section">
-                    <p class="section-title">AI 风险评估</p>
-                    <template v-if="item.ai_risk_score !== null">
-                        <el-tag :type="getRiskParams(item.ai_risk_score).type" effect="dark" size="small">
-                            {{ getRiskParams(item.ai_risk_score).label }} ({{ item.ai_risk_score }})
-                        </el-tag>
-                        <p class="audit-comment">AI 意见: {{ item.ai_audit_comment || '无' }}</p>
-                    </template>
-                    <el-tag v-else type="info" size="small">分析中...</el-tag>
-                </div>
-
-                <div class="card-actions">
-                    <template v-if="item.status === 'pending'">
-                        <el-button type="success" size="small" @click="handleDecision(item.id, 'approved')">通过</el-button>
-                        <el-button type="danger" size="small" @click="handleDecision(item.id, 'rejected', '不符合安全规定')">驳回</el-button>
-                    </template>
-                    <el-button v-if="canMarkUsed(item)" type="primary" size="small" @click="handleMarkUsed(item)">
-                        标记已使用
-                    </el-button>
-                    <el-button type="danger" size="small" plain @click="handleDelete(item.id)">删除</el-button>
-                </div>
-            </el-card>
+            </div>
         </div>
-
-        <el-empty v-if="filteredReservations.length === 0" description="暂无待处理活动" />
     </div>
 </template>
 
 <style scoped>
+.audit-content {
+    border-radius: 24px !important;
+    padding: 12px;
+}
+
 .audit-toolbar {
     --toolbar-field-width: 160px;
 }
@@ -247,6 +282,54 @@ const formatDateTime = (value) => {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 14px;
+}
+
+.audit-empty-layout {
+    min-height: clamp(300px, 54vh, 520px);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.audit-empty {
+    padding: 6px 0 0;
+}
+
+.audit-empty :deep(.el-empty__description p) {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.audit-empty-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.audit-status-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.audit-status-pill {
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.44);
+    border: 1px solid rgba(255, 255, 255, 0.54);
+    padding: 9px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #60636c;
+}
+
+.audit-status-pill strong {
+    font-size: 14px;
+    color: #2a2d36;
 }
 
 .audit-card {
@@ -346,6 +429,16 @@ html.dark .meta-item {
     background: rgba(255, 255, 255, 0.08);
 }
 
+html.dark .audit-status-pill {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #c1c4ce;
+}
+
+html.dark .audit-status-pill strong {
+    color: #f0f2f7;
+}
+
 html.dark .proposal-text,
 html.dark .audit-comment {
     color: #e7e9ef;
@@ -356,12 +449,29 @@ html.dark .proposal-link {
 }
 
 @media (max-width: 768px) {
+    .audit-content {
+        padding: 10px;
+    }
+
     .audit-card-list {
         grid-template-columns: 1fr;
     }
 
     .card-meta {
         grid-template-columns: 1fr;
+    }
+
+    .audit-empty-layout {
+        min-height: clamp(340px, 48vh, 620px);
+    }
+
+    .audit-status-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .audit-status-pill {
+        border-radius: 12px;
+        padding: 8px 10px;
     }
 }
 </style>
