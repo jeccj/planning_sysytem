@@ -21,4 +21,10 @@ export class Announcement {
         default: AnnouncementTargetRole.ALL,
     })
     targetRole: AnnouncementTargetRole;
+
+    @Column({ name: 'scope_building', nullable: true })
+    scopeBuilding: string;
+
+    @Column({ name: 'scope_floor', nullable: true })
+    scopeFloor: string;
 }

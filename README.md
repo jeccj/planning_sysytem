@@ -105,6 +105,17 @@
 - `GET /venues/building-availability`
 - `GET /venues/structure`
 
+### 结构化导入（系统管理员）
+- 前端入口：`系统设置 -> 结构化数据导入（用户 / 场馆）`
+- 后端接口：`POST /system-config/import/structured`
+- 上传方式：`multipart/form-data`
+  - `users_file`：用户 CSV（可选）
+  - `venues_file`：场馆 CSV（可选）
+  - `dry_run`：`true/false`，默认 `true`
+  - `replace_classrooms`：`true/false`，默认 `false`
+- 严格校验：CSV 不按模板会直接 `400 Bad Request`，并返回明确原因（缺列、重复列、未知列、空文件、字段值非法、关联管理员不存在等）
+- 详细模板和字段规则：`backend-ts/docs/STRUCTURED_IMPORT.md`
+
 ## 前端交互约定（当前实现）
 - 二级弹窗统一在当前视图容器渲染（非全屏 body 覆盖）
 - 弹窗按“当前可用区域中心”定位

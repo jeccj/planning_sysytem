@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -8,6 +8,18 @@ import { useAuthStore } from '../../stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const isSysAdmin = computed(() => authStore.user?.role === 'sys_admin')
+const isFloorAdmin = computed(() => authStore.user?.role === 'floor_admin')
+const canAccessVenueTab = computed(() => {
+  if (authStore.user?.role === 'sys_admin') return true
+  if (!['venue_admin', 'floor_admin'].includes(authStore.user?.role || '')) return false
+  const managedBuilding = (authStore.user?.managed_building || authStore.user?.managedBuilding || '').toString().trim()
+  const managedFloor = (authStore.user?.managed_floor || authStore.user?.managedFloor || '').toString().trim()
+  return !!managedBuilding || !!managedFloor
+})
+const statsRowClass = computed(() => ({
+  'stats-row--single': !isSysAdmin.value,
+}))
 const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 const classroomTypeSet = new Set(['Classroom', '教室'])
 const buildingFallbackNotified = ref(false)
@@ -46,14 +58,21 @@ const applyVenueScope = (venues) => {
   const list = Array.isArray(venues) ? venues : []
   const role = authStore.user?.role
   const userId = Number(authStore.user?.id)
+  const managedBuilding = (authStore.user?.managed_building || authStore.user?.managedBuilding || '').toString().trim()
+  const managedFloor = (authStore.user?.managed_floor || authStore.user?.managedFloor || '').toString().trim()
 
   if (role === 'venue_admin' && Number.isFinite(userId)) {
-    return list.filter((item) => Number(item?.admin_id ?? item?.adminId) === userId)
+    if (!managedBuilding && !managedFloor) {
+      return []
+    }
+    return list.filter((item) => {
+      const inBuilding = !managedBuilding || getVenueBuildingName(item) === managedBuilding
+      const inFloor = !managedFloor || getVenueFloorLabel(item) === managedFloor
+      return inBuilding && inFloor
+    })
   }
 
   if (role === 'floor_admin') {
-    const managedBuilding = (authStore.user?.managed_building || authStore.user?.managedBuilding || '').toString().trim()
-    const managedFloor = (authStore.user?.managed_floor || authStore.user?.managedFloor || '').toString().trim()
     return list.filter((item) => {
       const inBuilding = !managedBuilding || getVenueBuildingName(item) === managedBuilding
       const inFloor = !managedFloor || getVenueFloorLabel(item) === managedFloor
@@ -178,10 +197,11 @@ const buildingAvailability = ref(createEmptyBuildingAvailability())
 
 const fetchDashboardData = async () => {
   try {
+     const loadUsers = authStore.user?.role === 'sys_admin'
      const [venuesRes, reservationsRes, usersRes] = await Promise.allSettled([
         api.get('/venues/'),
         api.get('/reservations/'),
-        api.get('/users/')
+        loadUsers ? api.get('/users/') : Promise.resolve({ data: [] })
      ])
 
      const venues = venuesRes.status === 'fulfilled' ? (venuesRes.value?.data || []) : []
@@ -324,8 +344,8 @@ const goToAnnouncements = () => {
 <template>
   <div class="dashboard-wrapper app-page app-stack">
             <!-- 1. Stats Row: Glass Pills (Horizontal: Icon | Title | Value) -->
-    <div class="stats-row">
-      <div class="stat-pill glass-pill">
+    <div class="stats-row" :class="statsRowClass">
+      <div v-if="isSysAdmin" class="stat-pill glass-pill">
         <div class="stat-left">
             <div class="icon-box blue sm"><el-icon><Monitor /></el-icon></div>
             <span class="label">场馆总数</span>
@@ -342,7 +362,7 @@ const goToAnnouncements = () => {
         <div v-if="stats.pendingReservations > 0" class="badge-dot"></div>
       </div>
       
-      <div class="stat-pill glass-pill">
+      <div v-if="isSysAdmin" class="stat-pill glass-pill">
         <div class="stat-left">
             <div class="icon-box purple sm"><el-icon><User /></el-icon></div>
             <span class="label">注册用户</span>
@@ -355,7 +375,7 @@ const goToAnnouncements = () => {
     <div class="dashboard-grid">
         <!-- Left Col: Venue Breakdown & Quick Actions -->
         <div class="left-col">
-            <el-card class="glass-panel" shadow="never">
+            <el-card v-if="isSysAdmin" class="glass-panel" shadow="never">
                 <template #header>
                     <div class="panel-header">
                         <span><el-icon><DataAnalysis /></el-icon> 资源概况 (空闲/总数)</span>
@@ -439,11 +459,11 @@ const goToAnnouncements = () => {
                 </div>
             </el-card>
 
-             <div class="quick-actions glass-panel">
+             <div v-if="!isFloorAdmin" class="quick-actions glass-panel">
                 <div class="action-btn" @click="$router.push('/admin/audit')">
                     审核中心
                 </div>
-                <div class="action-btn" @click="$router.push('/admin/venues')">
+                <div v-if="canAccessVenueTab" class="action-btn" @click="$router.push('/admin/venues')">
                     场馆管理
                 </div>
                  <div class="action-btn disabled">
@@ -508,6 +528,14 @@ const goToAnnouncements = () => {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 24px;
+}
+
+.stats-row--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stats-row--single {
+    grid-template-columns: 1fr;
 }
 
 

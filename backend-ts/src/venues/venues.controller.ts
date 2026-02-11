@@ -19,11 +19,14 @@ export class VenuesController {
     ) { }
 
     @Get()
+    @UseGuards(JwtAuthGuard)
     async findAll(
+        @CurrentUser() user: User,
         @Query('skip') skip: string = '0',
         @Query('limit') limit: string = '100'
     ): Promise<VenueResponseDto[]> {
-        const venues = await this.venuesService.findAll(+skip, +limit);
+        const scope = this.buildVenueScope(user);
+        const venues = await this.venuesService.findAll(+skip, +limit, scope);
         return venues.map(this.toResponseDto);
     }
 
@@ -48,20 +51,11 @@ export class VenuesController {
 
     @Post()
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    @Roles(UserRole.SYS_ADMIN)
     async create(
         @CurrentUser() user: User,
         @Body() createVenueDto: CreateVenueDto,
     ): Promise<VenueResponseDto> {
-        if (user.role === UserRole.FLOOR_ADMIN) {
-            if (user.managedBuilding) {
-                createVenueDto.building_name = user.managedBuilding;
-            }
-            if (user.managedFloor) {
-                createVenueDto.floor_label = user.managedFloor;
-            }
-            createVenueDto.admin_id = user.id;
-        }
         const assignedAdminId = user.role === UserRole.SYS_ADMIN && createVenueDto.admin_id
             ? Number(createVenueDto.admin_id)
             : user.id;
@@ -82,7 +76,11 @@ export class VenuesController {
             if (!existing) {
                 throw new HttpException('Venue not found', HttpStatus.NOT_FOUND);
             }
-            this.assertFloorAdminVenueAccess(user, existing);
+            this.assertScopedAdminVenueAccess(user, existing);
+            this.assertScopedAdminVenuePayload(user, updateVenueDto, existing);
+            if (user.role !== UserRole.SYS_ADMIN) {
+                updateVenueDto.admin_id = undefined;
+            }
             const venue = await this.venuesService.update(+id, updateVenueDto);
             return this.toResponseDto(venue);
         } catch (error) {
@@ -102,7 +100,7 @@ export class VenuesController {
             if (!existing) {
                 throw new HttpException('Venue not found', HttpStatus.NOT_FOUND);
             }
-            this.assertFloorAdminVenueAccess(user, existing);
+            this.assertScopedAdminVenueAccess(user, existing);
             const venue = await this.venuesService.remove(+id);
             return this.toResponseDto(venue);
         } catch (error) {
@@ -188,7 +186,7 @@ export class VenuesController {
             if (!existing) {
                 throw new HttpException('Venue not found', HttpStatus.NOT_FOUND);
             }
-            this.assertFloorAdminVenueAccess(user, existing);
+            this.assertScopedAdminVenueAccess(user, existing);
             return await this.venuesService.scheduleMaintenance(
                 +id,
                 body.start,
@@ -200,8 +198,11 @@ export class VenuesController {
         }
     }
 
-    private assertFloorAdminVenueAccess(user: User, venue: any) {
-        if (user.role !== UserRole.FLOOR_ADMIN) {
+    private assertScopedAdminVenueAccess(user: User, venue: any) {
+        if (user.role === UserRole.SYS_ADMIN) {
+            return;
+        }
+        if (![UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN].includes(user.role)) {
             return;
         }
         const parsed = parseVenueLocation(venue.location, venue.name);
@@ -210,7 +211,7 @@ export class VenuesController {
         const requiredBuilding = (user.managedBuilding || '').trim();
         const requiredFloor = (user.managedFloor || '').trim();
         if (!requiredBuilding && !requiredFloor) {
-            throw new HttpException('Floor admin scope is not configured', HttpStatus.FORBIDDEN);
+            throw new HttpException('Admin scope is not configured', HttpStatus.FORBIDDEN);
         }
         if (requiredBuilding && requiredBuilding !== venueBuilding) {
             throw new HttpException('No permission for this building', HttpStatus.FORBIDDEN);
@@ -220,13 +221,42 @@ export class VenuesController {
         }
     }
 
+    private assertScopedAdminVenuePayload(user: User, payload: CreateVenueDto, existingVenue: any) {
+        if (user.role === UserRole.SYS_ADMIN) {
+            return;
+        }
+        if (![UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN].includes(user.role)) {
+            return;
+        }
+        const parsed = parseVenueLocation(existingVenue.location, existingVenue.name);
+        const nextBuilding = (payload.building_name || existingVenue.buildingName || parsed.buildingName || '').trim();
+        const nextFloor = (payload.floor_label || existingVenue.floorLabel || parsed.floorLabel || '').trim();
+        const requiredBuilding = (user.managedBuilding || '').trim();
+        const requiredFloor = (user.managedFloor || '').trim();
+
+        if (!requiredBuilding && !requiredFloor) {
+            throw new HttpException('Admin scope is not configured', HttpStatus.FORBIDDEN);
+        }
+        if (requiredBuilding && nextBuilding !== requiredBuilding) {
+            throw new HttpException('No permission for this building', HttpStatus.FORBIDDEN);
+        }
+        if (requiredFloor && nextFloor !== requiredFloor) {
+            throw new HttpException('No permission for this floor', HttpStatus.FORBIDDEN);
+        }
+    }
+
     private buildVenueScope(user: User) {
         if (user.role === UserRole.VENUE_ADMIN) {
+            const managedBuilding = (user.managedBuilding || '').trim();
+            const managedFloor = (user.managedFloor || '').trim();
+            if (!managedBuilding && !managedFloor) {
+                return { role: user.role, managedBuilding: '__NO_SCOPE__' };
+            }
             return {
                 role: user.role,
                 adminId: user.id,
-                managedBuilding: (user.managedBuilding || '').trim(),
-                managedFloor: (user.managedFloor || '').trim(),
+                managedBuilding,
+                managedFloor,
             };
         }
         if (user.role === UserRole.FLOOR_ADMIN) {

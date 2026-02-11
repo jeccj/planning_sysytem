@@ -13,4 +13,12 @@ export class CreateAnnouncementDto {
     @IsEnum(AnnouncementTargetRole)
     @IsOptional()
     target_role?: AnnouncementTargetRole;
+
+    @IsString()
+    @IsOptional()
+    scope_building?: string;
+
+    @IsString()
+    @IsOptional()
+    scope_floor?: string;
 }

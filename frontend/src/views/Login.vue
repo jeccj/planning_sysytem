@@ -265,6 +265,7 @@ const handleForgotPassword = async () => {
       :close-on-click-modal="false"
       :close-on-press-escape="false"
       :show-close="false"
+      :lock-scroll="false"
       class="glass-dialog"
     >
       <div class="password-change-hint">
@@ -303,6 +304,7 @@ const handleForgotPassword = async () => {
       title="系统通知与公告" 
       width="550px"
       :close-on-click-modal="false"
+      :lock-scroll="false"
       class="glass-dialog announcement-dialog"
     >
       <div class="announcement-list">
@@ -340,6 +342,7 @@ const handleForgotPassword = async () => {
       width="430px"
       :teleported="false"
       :modal-append-to-body="false"
+      :lock-scroll="false"
       class="glass-dialog"
     >
       <el-alert type="info" :closable="false" show-icon>

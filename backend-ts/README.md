@@ -45,3 +45,12 @@ npm run build
 npm run start:prod
 npm run test
 ```
+
+## 结构化导入（users / venues）
+- 脚本命令：
+```bash
+npm run import:structured -- --users /path/users.csv --venues /path/venues.csv --dry-run
+```
+- 系统内接口：`POST /system-config/import/structured`（仅 `sys_admin`）
+- 严格格式校验：文件不按模板会返回 `400` 并附带具体错误。
+- 模板与字段规则见：`docs/STRUCTURED_IMPORT.md`

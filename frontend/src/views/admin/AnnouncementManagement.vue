@@ -16,7 +16,9 @@ const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 const form = ref({
   title: '',
   content: '',
-  target_role: 'all'
+  target_role: 'all',
+  scope_building: '',
+  scope_floor: ''
 })
 
 const targetRoleOptions = [
@@ -53,7 +55,7 @@ watch(
 function openCreate() {
   isEdit.value = false
   currentId.value = null
-  form.value = { title: '', content: '', target_role: 'all' }
+  form.value = { title: '', content: '', target_role: 'all', scope_building: '', scope_floor: '' }
   showModal.value = true
 }
 
@@ -63,7 +65,9 @@ const openEdit = (row) => {
   form.value = {
     title: row.title,
     content: row.content,
-    target_role: row.target_role
+    target_role: row.target_role,
+    scope_building: row.scope_building || '',
+    scope_floor: row.scope_floor || ''
   }
   showModal.value = true
 }
@@ -153,6 +157,13 @@ const filteredAnnouncements = computed(() => {
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="作用范围" min-width="160">
+          <template #default="scope">
+            <span>
+              {{ scope.row.scope_building || '全部楼栋' }} / {{ scope.row.scope_floor || '全部楼层' }}
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column prop="publish_time" label="发布时间" width="200">
           <template #default="scope">
             {{ formatTime(scope.row.publish_time) }}
@@ -185,6 +196,10 @@ const filteredAnnouncements = computed(() => {
             <span class="label">发布:</span>
             <span>{{ formatTime(item.publish_time) }}</span>
           </div>
+          <div class="info-row">
+            <span class="label">范围:</span>
+            <span>{{ item.scope_building || '全部楼栋' }} / {{ item.scope_floor || '全部楼层' }}</span>
+          </div>
           <div class="content-preview">{{ item.content }}</div>
         </div>
         <div class="card-actions">
@@ -195,7 +210,7 @@ const filteredAnnouncements = computed(() => {
     </div>
     <el-empty v-if="filteredAnnouncements.length === 0" description="没有符合条件的公告" />
 
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑公告' : '发布公告'" width="700px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑公告' : '发布公告'" width="700px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
       <el-form :model="form">
         <div class="form-pill">
           <el-form-item label="公告标题">
@@ -208,6 +223,18 @@ const filteredAnnouncements = computed(() => {
             <el-select v-model="form.target_role">
               <el-option v-for="opt in targetRoleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
             </el-select>
+          </el-form-item>
+        </div>
+
+        <div class="form-pill">
+          <el-form-item label="公告作用楼栋（可选）">
+            <el-input v-model="form.scope_building" placeholder="留空表示全部楼栋，例如 A栋" />
+          </el-form-item>
+        </div>
+
+        <div class="form-pill">
+          <el-form-item label="公告作用楼层（可选）">
+            <el-input v-model="form.scope_floor" placeholder="留空表示全部楼层，例如 3层" />
           </el-form-item>
         </div>
 

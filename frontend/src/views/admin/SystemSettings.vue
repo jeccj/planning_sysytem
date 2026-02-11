@@ -6,6 +6,12 @@ import { ElMessage } from 'element-plus'
 const loading = ref(false)
 const testing = ref(false)
 const llmStatus = ref('loading')
+const importLoading = ref(false)
+const importDryRun = ref(true)
+const importReplaceClassrooms = ref(false)
+const usersImportFile = ref(null)
+const venuesImportFile = ref(null)
+const importResult = ref(null)
 
 const config = reactive({
     llm_provider: 'gemini',
@@ -98,6 +104,64 @@ const testConnection = async () => {
     }
 }
 
+const handleUsersFileSelect = (event) => {
+    const file = event?.target?.files?.[0] || null
+    usersImportFile.value = file
+}
+
+const handleVenuesFileSelect = (event) => {
+    const file = event?.target?.files?.[0] || null
+    venuesImportFile.value = file
+}
+
+const submitStructuredImport = async () => {
+    if (!usersImportFile.value && !venuesImportFile.value) {
+        ElMessage.error('请至少选择 users.csv 或 venues.csv')
+        return
+    }
+
+    importLoading.value = true
+    importResult.value = null
+    try {
+        const formData = new FormData()
+        if (usersImportFile.value) {
+            formData.append('users_file', usersImportFile.value)
+        }
+        if (venuesImportFile.value) {
+            formData.append('venues_file', venuesImportFile.value)
+        }
+        formData.append('dry_run', String(importDryRun.value))
+        formData.append('replace_classrooms', String(importReplaceClassrooms.value))
+
+        const res = await api.post('/system-config/import/structured', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        })
+        importResult.value = res.data
+        ElMessage.success(res.data?.message || '导入完成')
+    } catch (e) {
+        const detail = normalizeImportError(e)
+        importResult.value = { ok: false, message: detail }
+        ElMessage.error(detail)
+    } finally {
+        importLoading.value = false
+    }
+}
+
+const normalizeImportError = (error) => {
+    const payload = error?.response?.data
+    const message = payload?.message
+    if (Array.isArray(message)) {
+        return message.join('；')
+    }
+    if (typeof message === 'string' && message.trim()) {
+        return message
+    }
+    if (typeof payload?.detail === 'string' && payload.detail.trim()) {
+        return payload.detail
+    }
+    return error?.message || '导入失败'
+}
+
 onMounted(() => {
     fetchConfig()
     checkLlmStatus()
@@ -158,6 +222,46 @@ onMounted(() => {
                 </el-form-item>
             </el-form>
         </el-card>
+
+        <el-card class="box-card app-panel" shadow="never">
+            <template #header>
+                <div class="card-header">
+                    <span>结构化数据导入（用户 / 场馆）</span>
+                </div>
+            </template>
+
+            <el-form label-position="top">
+                <el-form-item label="用户 CSV（users.csv）">
+                    <input class="csv-file-input" type="file" accept=".csv,text/csv" @change="handleUsersFileSelect" />
+                    <div class="tip" v-if="usersImportFile">已选：{{ usersImportFile.name }}</div>
+                </el-form-item>
+
+                <el-form-item label="场馆 CSV（venues.csv）">
+                    <input class="csv-file-input" type="file" accept=".csv,text/csv" @change="handleVenuesFileSelect" />
+                    <div class="tip" v-if="venuesImportFile">已选：{{ venuesImportFile.name }}</div>
+                </el-form-item>
+
+                <el-form-item>
+                    <el-checkbox v-model="importDryRun">先 dry-run 校验（不落库）</el-checkbox>
+                </el-form-item>
+
+                <el-form-item>
+                    <el-checkbox v-model="importReplaceClassrooms">导入前清空全部教室（会清理教室预约）</el-checkbox>
+                </el-form-item>
+
+                <el-form-item>
+                    <el-button type="primary" :loading="importLoading" @click="submitStructuredImport">执行导入</el-button>
+                </el-form-item>
+            </el-form>
+
+            <div v-if="importResult" class="import-result" :class="{ 'is-error': importResult.ok === false }">
+                <div class="import-title">{{ importResult.message }}</div>
+                <div v-if="importResult.dbPath" class="tip">DB: {{ importResult.dbPath }}</div>
+                <div v-if="importResult.users" class="tip">users: 新增 {{ importResult.users.created }}，更新 {{ importResult.users.updated }}</div>
+                <div v-if="importResult.venues" class="tip">venues: 新增 {{ importResult.venues.created }}，更新 {{ importResult.venues.updated }}</div>
+                <div v-if="importResult.classroomsDeleted !== undefined" class="tip">classrooms deleted: {{ importResult.classroomsDeleted }}</div>
+            </div>
+        </el-card>
     </div>
 </template>
 
@@ -174,6 +278,39 @@ onMounted(() => {
     font-size: 12px;
     color: #909399;
     margin-top: 4px;
+}
+
+.csv-file-input {
+    width: 100%;
+    border: 1px dashed rgba(120, 126, 144, 0.45);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.45);
+}
+
+html.dark .csv-file-input {
+    background: rgba(30, 30, 34, 0.5);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #eaeaea;
+}
+
+.import-result {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(103, 194, 58, 0.12);
+    border: 1px solid rgba(103, 194, 58, 0.35);
+}
+
+.import-result.is-error {
+    background: rgba(245, 108, 108, 0.12);
+    border-color: rgba(245, 108, 108, 0.4);
+}
+
+.import-title {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 4px;
 }
 
 .llm-status-island {

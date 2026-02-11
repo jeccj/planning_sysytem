@@ -490,6 +490,35 @@ const reservationForm = ref({
     end_time_input: ''
 })
 const showProposalModal = ref(false)
+const bookingMode = ref('single')
+const batchAllOrNothing = ref(true)
+
+const createEmptyBatchSlot = () => ({
+    date: '',
+    start_time_input: '',
+    end_time_input: '',
+})
+
+const createDefaultRecurringRule = () => ({
+    frequency: 'weekly',
+    interval: 1,
+    end_type: 'occurrences',
+    occurrences: 4,
+    until_date: '',
+    week_days: [],
+})
+
+const batchSlots = ref([createEmptyBatchSlot()])
+const recurringRule = ref(createDefaultRecurringRule())
+const weekDayOptions = [
+    { label: '周一', value: 1 },
+    { label: '周二', value: 2 },
+    { label: '周三', value: 3 },
+    { label: '周四', value: 4 },
+    { label: '周五', value: 5 },
+    { label: '周六', value: 6 },
+    { label: '周日', value: 0 },
+]
 
 // File Upload Logic
 const fileList = ref([])
@@ -532,6 +561,10 @@ const isValidDateTimeString = (value) => {
 
 const openBooking = (venue) => {
     selectedVenue.value = venue
+    bookingMode.value = 'single'
+    batchAllOrNothing.value = true
+    batchSlots.value = [createEmptyBatchSlot()]
+    recurringRule.value = createDefaultRecurringRule()
     
     // Merge AI Intent if exists, otherwise default
     if (Object.keys(parsedIntent.value).length > 0) {
@@ -581,68 +614,287 @@ const openBooking = (venue) => {
             reservationForm.value.start_time_input = ''
             reservationForm.value.end_time_input = ''
     }
+
+    if (reservationForm.value.date && reservationForm.value.start_time_input && reservationForm.value.end_time_input) {
+        batchSlots.value = [{
+            date: reservationForm.value.date,
+            start_time_input: reservationForm.value.start_time_input,
+            end_time_input: reservationForm.value.end_time_input,
+        }]
+        const weekday = new Date(`${reservationForm.value.date}T00:00:00`).getDay()
+        recurringRule.value.week_days = [weekday]
+    }
     
     showModal.value = true
 }
 
-const submitBooking = async () => {
-    if (!reservationForm.value.date) {
-        ElMessage.error('请选择预约日期')
+const syncAdvancedModeSeed = () => {
+    if (bookingMode.value === 'batch') {
+        const first = batchSlots.value[0] || createEmptyBatchSlot()
+        if (!first.date && reservationForm.value.date) {
+            first.date = reservationForm.value.date
+        }
+        if (!first.start_time_input && reservationForm.value.start_time_input) {
+            first.start_time_input = reservationForm.value.start_time_input
+        }
+        if (!first.end_time_input && reservationForm.value.end_time_input) {
+            first.end_time_input = reservationForm.value.end_time_input
+        }
+        batchSlots.value[0] = first
+    }
+    if (bookingMode.value === 'recurring' && recurringRule.value.week_days.length === 0 && reservationForm.value.date) {
+        recurringRule.value.week_days = [new Date(`${reservationForm.value.date}T00:00:00`).getDay()]
+    }
+}
+
+const addBatchSlot = () => {
+    if (batchSlots.value.length >= 100) {
+        ElMessage.warning('批量预约最多 100 条')
         return
     }
-    if (!reservationForm.value.start_time_input || !reservationForm.value.end_time_input) {
-        ElMessage.error('请填写开始时间和结束时间')
+    batchSlots.value.push(createEmptyBatchSlot())
+}
+
+const removeBatchSlot = (index) => {
+    if (batchSlots.value.length === 1) {
+        batchSlots.value = [createEmptyBatchSlot()]
         return
+    }
+    batchSlots.value.splice(index, 1)
+}
+
+const normalizeApiErrorMessage = (error) => {
+    const message = error?.response?.data?.message
+    if (Array.isArray(message) && message.length > 0) {
+        return message.join('；')
+    }
+    if (typeof message === 'string' && message.trim()) {
+        return message
+    }
+    return error?.response?.data?.detail || error?.message || '提交失败，请稍后重试'
+}
+
+const validateCommonReservationForm = () => {
+    if (!selectedVenue.value?.id) {
+        ElMessage.error('请选择场馆')
+        return false
+    }
+    if (!reservationForm.value.activity_name?.trim()) {
+        ElMessage.error('请填写活动名称')
+        return false
+    }
+    if (!reservationForm.value.organizer_unit?.trim()) {
+        ElMessage.error('请填写主办单位')
+        return false
+    }
+    if (!reservationForm.value.contact_name?.trim()) {
+        ElMessage.error('请填写负责人')
+        return false
+    }
+    if (!reservationForm.value.contact_phone?.trim()) {
+        ElMessage.error('请填写联系电话')
+        return false
+    }
+    if (!reservationForm.value.proposal_content?.trim()) {
+        ElMessage.error('请填写活动提案')
+        return false
+    }
+    const attendees = Number(reservationForm.value.attendees_count)
+    if (!Number.isFinite(attendees) || attendees < 1) {
+        ElMessage.error('预计人数必须大于 0')
+        return false
+    }
+    return true
+}
+
+const resolveRangeFromInputs = (date, startTime, endTime, labelPrefix = '预约时间') => {
+    if (!date) {
+        ElMessage.error(`${labelPrefix}缺少日期`)
+        return null
+    }
+    if (!startTime || !endTime) {
+        ElMessage.error(`${labelPrefix}缺少开始/结束时间`)
+        return null
     }
 
-    const startMinutes = timeStringToMinutes(reservationForm.value.start_time_input)
-    const endMinutes = timeStringToMinutes(reservationForm.value.end_time_input)
+    const startMinutes = timeStringToMinutes(startTime)
+    const endMinutes = timeStringToMinutes(endTime)
     if (startMinutes === null || endMinutes === null) {
-        ElMessage.error('时间格式无效，请使用 HH:mm')
-        return
+        ElMessage.error(`${labelPrefix}格式无效，请使用 HH:mm`)
+        return null
     }
     if (endMinutes <= startMinutes) {
-        ElMessage.error('结束时间必须晚于开始时间')
-        return
+        ElMessage.error(`${labelPrefix}结束时间必须晚于开始时间`)
+        return null
     }
 
-    const startDateTime = buildDateTimeString(reservationForm.value.date, reservationForm.value.start_time_input)
-    const endDateTime = buildDateTimeString(reservationForm.value.date, reservationForm.value.end_time_input)
+    const startDateTime = buildDateTimeString(date, startTime)
+    const endDateTime = buildDateTimeString(date, endTime)
     if (!isValidDateTimeString(startDateTime) || !isValidDateTimeString(endDateTime)) {
-        console.error("Invalid DateTime:", startDateTime, endDateTime)
-        ElMessage.error('时间无效，请重新填写')
+        ElMessage.error(`${labelPrefix}无效，请重新填写`)
+        return null
+    }
+
+    return { startDateTime, endDateTime }
+}
+
+const buildReservationPayload = (startDateTime, endDateTime) => ({
+    venue_id: Number(selectedVenue.value.id),
+    organizer: authStore.user?.username || '',
+    activity_name: reservationForm.value.activity_name,
+    organizer_unit: reservationForm.value.organizer_unit,
+    contact_name: reservationForm.value.contact_name,
+    contact_phone: reservationForm.value.contact_phone,
+    proposal_content: reservationForm.value.proposal_content,
+    attendees_count: Number(reservationForm.value.attendees_count),
+    start_time: startDateTime,
+    end_time: endDateTime,
+})
+
+const clearBookingFormState = () => {
+    showModal.value = false
+    parsedIntent.value = {}
+    selectedFile.value = null
+    fileList.value = []
+    bookingMode.value = 'single'
+    batchSlots.value = [createEmptyBatchSlot()]
+    batchAllOrNothing.value = true
+    recurringRule.value = createDefaultRecurringRule()
+}
+
+const submitSingleBooking = async () => {
+    const mainRange = resolveRangeFromInputs(
+        reservationForm.value.date,
+        reservationForm.value.start_time_input,
+        reservationForm.value.end_time_input,
+    )
+    if (!mainRange) return
+
+    const payload = buildReservationPayload(mainRange.startDateTime, mainRange.endDateTime)
+    const formData = new FormData()
+    Object.entries(payload).forEach(([key, value]) => {
+        formData.append(key, String(value))
+    })
+    if (selectedFile.value) {
+        formData.append('file', selectedFile.value)
+    }
+
+    await api.post('/reservations/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    ElMessage.success('申请提交成功')
+    clearBookingFormState()
+}
+
+const submitBatchBooking = async () => {
+    if (batchSlots.value.length < 1) {
+        ElMessage.error('请至少添加一个预约时段')
         return
     }
-    try {
-        const formData = new FormData();
-        formData.append('venue_id', selectedVenue.value.id);
-        formData.append('organizer', authStore.user.username);
-        formData.append('activity_name', reservationForm.value.activity_name);
-        formData.append('organizer_unit', reservationForm.value.organizer_unit);
-        formData.append('contact_name', reservationForm.value.contact_name);
-        formData.append('contact_phone', reservationForm.value.contact_phone);
-        formData.append('proposal_content', reservationForm.value.proposal_content);
-        formData.append('attendees_count', reservationForm.value.attendees_count);
-        formData.append('start_time', startDateTime);
-        formData.append('end_time', endDateTime);
-        
-        if (selectedFile.value) {
-            formData.append('file', selectedFile.value);
-        }
 
-        await api.post('/reservations/', formData, {
-            headers: {
-                'Content-Type': 'multipart/form-data'
-            }
-        })
-        ElMessage.success("申请提交成功")
-        showModal.value = false
-        parsedIntent.value = {} // Clear intent after success
-        // Clear file
-        selectedFile.value = null
-        fileList.value = []
+    const items = []
+    for (let i = 0; i < batchSlots.value.length; i += 1) {
+        const slot = batchSlots.value[i]
+        const range = resolveRangeFromInputs(slot.date, slot.start_time_input, slot.end_time_input, `第 ${i + 1} 条时段`)
+        if (!range) return
+        items.push(buildReservationPayload(range.startDateTime, range.endDateTime))
+    }
+
+    const res = await api.post('/reservations/batch', {
+        items,
+        all_or_nothing: !!batchAllOrNothing.value,
+    })
+
+    const createdCount = Number(res?.data?.created_count || 0)
+    const failedCount = Number(res?.data?.failed_count || 0)
+    if (failedCount > 0) {
+        ElMessage.warning(`批量预约完成：成功 ${createdCount} 条，失败 ${failedCount} 条`)
+    } else {
+        ElMessage.success(`批量预约成功：共 ${createdCount} 条`)
+        clearBookingFormState()
+    }
+}
+
+const submitRecurringBooking = async () => {
+    const mainRange = resolveRangeFromInputs(
+        reservationForm.value.date,
+        reservationForm.value.start_time_input,
+        reservationForm.value.end_time_input,
+        '首个预约时间',
+    )
+    if (!mainRange) return
+
+    const interval = Number(recurringRule.value.interval || 1)
+    if (!Number.isFinite(interval) || interval < 1 || interval > 12) {
+        ElMessage.error('循环间隔必须在 1-12 之间')
+        return
+    }
+
+    const recurrence = {
+        frequency: recurringRule.value.frequency,
+        interval,
+    }
+
+    if (recurringRule.value.end_type === 'occurrences') {
+        const occurrences = Number(recurringRule.value.occurrences || 0)
+        if (!Number.isFinite(occurrences) || occurrences < 1 || occurrences > 120) {
+            ElMessage.error('循环次数必须在 1-120 之间')
+            return
+        }
+        recurrence.occurrences = occurrences
+    } else {
+        const untilDate = recurringRule.value.until_date
+        if (!untilDate) {
+            ElMessage.error('请选择循环截止日期')
+            return
+        }
+        const untilDateTime = buildDateTimeString(untilDate, reservationForm.value.start_time_input)
+        if (!isValidDateTimeString(untilDateTime)) {
+            ElMessage.error('循环截止日期无效')
+            return
+        }
+        if (new Date(untilDateTime).getTime() < new Date(mainRange.startDateTime).getTime()) {
+            ElMessage.error('循环截止日期不能早于首个预约时间')
+            return
+        }
+        recurrence.until = untilDateTime
+    }
+
+    if (recurringRule.value.frequency === 'weekly' && recurringRule.value.week_days.length > 0) {
+        recurrence.week_days = recurringRule.value.week_days
+    }
+
+    const payload = {
+        ...buildReservationPayload(mainRange.startDateTime, mainRange.endDateTime),
+        recurrence,
+    }
+
+    const res = await api.post('/reservations/recurring', payload)
+    const createdCount = Number(res?.data?.created_count || 0)
+    const failedCount = Number(res?.data?.failed_count || 0)
+    if (failedCount > 0) {
+        ElMessage.warning(`循环预约完成：成功 ${createdCount} 条，失败 ${failedCount} 条`)
+    } else {
+        ElMessage.success(`循环预约成功：共 ${createdCount} 条`)
+        clearBookingFormState()
+    }
+}
+
+const submitBooking = async () => {
+    if (!validateCommonReservationForm()) return
+
+    try {
+        if (bookingMode.value === 'single') {
+            await submitSingleBooking()
+            return
+        }
+        if (bookingMode.value === 'batch') {
+            await submitBatchBooking()
+            return
+        }
+        await submitRecurringBooking()
     } catch (e) {
-        ElMessage.error("失败，请检查冲突")
+        ElMessage.error(normalizeApiErrorMessage(e))
         console.error(e)
     }
 }
@@ -831,6 +1083,7 @@ const goToAnnouncements = () => {
         width="760px"
         :teleported="false"
         :modal-append-to-body="false"
+        :lock-scroll="false"
         class="glass-dialog"
     >
         <div class="results-grid">
@@ -849,8 +1102,17 @@ const goToAnnouncements = () => {
     </el-dialog>
 
     <!-- BOOKING DIALOG: PILL STACK SYSTEM -->
-    <el-dialog v-model="showModal" title="预约场馆申请" width="600px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+    <el-dialog v-model="showModal" title="预约场馆申请" width="600px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
         <el-form :model="reservationForm">
+            <div class="form-pill">
+                <el-form-item label="预约模式">
+                    <el-radio-group v-model="bookingMode" size="small" class="booking-mode-group" @change="syncAdvancedModeSeed">
+                        <el-radio-button label="single">单次</el-radio-button>
+                        <el-radio-button label="batch">批量</el-radio-button>
+                        <el-radio-button label="recurring">循环</el-radio-button>
+                    </el-radio-group>
+                </el-form-item>
+            </div>
             <div class="form-pill">
                 <el-form-item label="活动名称">
                     <el-input v-model="reservationForm.activity_name" placeholder="请输入活动主题" />
@@ -892,8 +1154,8 @@ const goToAnnouncements = () => {
                     />
                 </el-form-item>
             </div>
-            <div class="form-pill">
-                <el-form-item label="预约时间">
+            <div v-if="bookingMode !== 'batch'" class="form-pill">
+                <el-form-item :label="bookingMode === 'recurring' ? '首个预约时间' : '预约时间'">
                     <div class="datetime-range">
                         <el-date-picker
                             v-model="reservationForm.date"
@@ -925,8 +1187,101 @@ const goToAnnouncements = () => {
                     </div>
                 </el-form-item>
             </div>
-            
-            <div class="form-pill">
+
+            <div v-if="bookingMode === 'batch'" class="form-pill">
+                <el-form-item label="批量时段">
+                    <div class="batch-slot-list">
+                        <div v-for="(slot, index) in batchSlots" :key="index" class="batch-slot-row">
+                            <el-date-picker
+                                v-model="slot.date"
+                                type="date"
+                                placeholder="日期"
+                                value-format="YYYY-MM-DD"
+                                format="YYYY-MM-DD"
+                                class="date-input"
+                                size="small"
+                            />
+                            <el-time-picker
+                                v-model="slot.start_time_input"
+                                placeholder="开始"
+                                value-format="HH:mm"
+                                format="HH:mm"
+                                class="time-input"
+                                size="small"
+                            />
+                            <el-time-picker
+                                v-model="slot.end_time_input"
+                                placeholder="结束"
+                                value-format="HH:mm"
+                                format="HH:mm"
+                                class="time-input"
+                                size="small"
+                            />
+                            <el-button size="small" text type="danger" @click="removeBatchSlot(index)">删除</el-button>
+                        </div>
+                        <div class="batch-actions">
+                            <el-button size="small" @click="addBatchSlot">新增时段</el-button>
+                            <el-checkbox v-model="batchAllOrNothing">全成全败（任一冲突则全部回滚）</el-checkbox>
+                        </div>
+                    </div>
+                </el-form-item>
+            </div>
+
+            <div v-if="bookingMode === 'recurring'" class="form-pill">
+                <el-form-item label="循环规则">
+                    <div class="recurring-config">
+                        <div class="recurring-row">
+                            <el-select v-model="recurringRule.frequency" size="small" class="recurrence-select">
+                                <el-option label="按天循环" value="daily" />
+                                <el-option label="按周循环" value="weekly" />
+                            </el-select>
+                            <el-input-number
+                                v-model="recurringRule.interval"
+                                :min="1"
+                                :max="12"
+                                controls-position="right"
+                                size="small"
+                            />
+                            <span class="recurring-hint">{{ recurringRule.frequency === 'daily' ? '天/次' : '周/次' }}</span>
+                        </div>
+
+                        <el-checkbox-group v-if="recurringRule.frequency === 'weekly'" v-model="recurringRule.week_days" class="weekdays-group">
+                            <el-checkbox v-for="d in weekDayOptions" :key="d.value" :label="d.value">{{ d.label }}</el-checkbox>
+                        </el-checkbox-group>
+
+                        <div class="recurring-row">
+                            <el-radio-group v-model="recurringRule.end_type" size="small">
+                                <el-radio-button label="occurrences">按次数</el-radio-button>
+                                <el-radio-button label="until">按截止日期</el-radio-button>
+                            </el-radio-group>
+                        </div>
+
+                        <div v-if="recurringRule.end_type === 'occurrences'" class="recurring-row">
+                            <el-input-number
+                                v-model="recurringRule.occurrences"
+                                :min="1"
+                                :max="120"
+                                controls-position="right"
+                                size="small"
+                            />
+                            <span class="recurring-hint">次（最多 120）</span>
+                        </div>
+                        <div v-else class="recurring-row">
+                            <el-date-picker
+                                v-model="recurringRule.until_date"
+                                type="date"
+                                placeholder="截止日期"
+                                value-format="YYYY-MM-DD"
+                                format="YYYY-MM-DD"
+                                class="date-input"
+                                size="small"
+                            />
+                        </div>
+                    </div>
+                </el-form-item>
+            </div>
+
+            <div v-if="bookingMode === 'single'" class="form-pill">
                 <el-form-item label="活动策划书">
                     <el-upload
                         class="upload-demo"
@@ -940,14 +1295,21 @@ const goToAnnouncements = () => {
                     </el-upload>
                 </el-form-item>
             </div>
+            <div v-else class="form-pill">
+                <el-form-item label="活动策划书">
+                    <div class="recurring-hint">批量/循环预约暂不支持附件上传，提案内容以文本为准。</div>
+                </el-form-item>
+            </div>
         </el-form>
         <template #footer>
             <el-button @click="showModal = false">取消</el-button>
-            <el-button type="primary" @click="submitBooking">提交申请</el-button>
+            <el-button type="primary" @click="submitBooking">
+                {{ bookingMode === 'single' ? '提交申请' : bookingMode === 'batch' ? '提交批量预约' : '提交循环预约' }}
+            </el-button>
         </template>
     </el-dialog>
 
-    <el-dialog v-model="showProposalModal" title="补充提案详情" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog spatial-modal" align-center>
+    <el-dialog v-model="showProposalModal" title="补充提案详情" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog spatial-modal" align-center>
         <div class="form-pill pill-stack">
             <el-form-item label="详细说明" label-position="top">
                 <el-input v-model="reservationForm.proposal_content" type="textarea" :rows="8" placeholder="描述流程、物资需求等..." />
@@ -960,7 +1322,7 @@ const goToAnnouncements = () => {
     </el-dialog>
 
     <!-- 场地详情弹窗 -->
-    <el-dialog v-model="showVenueDetail" title="场地详情" width="600px" :teleported="false" :modal-append-to-body="false" class="glass-dialog venue-detail-dialog">
+    <el-dialog v-model="showVenueDetail" title="场地详情" width="600px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog venue-detail-dialog">
         <div v-if="selectedVenueDetail" class="venue-detail-content">
             <!-- 场地图片 -->
             <div v-if="selectedVenueDetail.image_url" class="venue-image">
@@ -1240,6 +1602,66 @@ const goToAnnouncements = () => {
 .attendees-input {
     width: 100%;
 }
+
+.booking-mode-group {
+    width: 100%;
+}
+
+.booking-mode-group :deep(.el-radio-button__inner) {
+    border-radius: 999px !important;
+}
+
+.batch-slot-list {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.batch-slot-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 1.2fr) minmax(76px, 1fr) minmax(76px, 1fr) auto;
+    gap: 6px;
+    align-items: center;
+}
+
+.batch-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.recurring-config {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.recurring-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.recurrence-select {
+    width: 120px;
+}
+
+.recurring-hint {
+    font-size: 12px;
+    color: #7b818f;
+}
+
+.weekdays-group {
+    display: flex;
+    gap: 6px 10px;
+    flex-wrap: wrap;
+}
+
 .datetime-range {
     display: inline-flex;
     align-items: center;
@@ -1328,6 +1750,10 @@ const goToAnnouncements = () => {
     .row-stack {
         flex-direction: column;
         gap: 0;
+    }
+    .batch-slot-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
     }
     /* Make dialogs wider on mobile */
     :deep(.el-dialog) {

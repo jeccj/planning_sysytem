@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Announcement } from './entities/announcement.entity';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { AnnouncementTargetRole, UserRole } from '../common/enums';
@@ -20,30 +20,57 @@ export class AnnouncementsService {
         });
     }
 
-    async findForRole(role: UserRole, skip: number = 0, limit: number = 100): Promise<Announcement[]> {
+    async findForRole(
+        role: UserRole,
+        skip: number = 0,
+        limit: number = 100,
+        scope?: { managedBuilding?: string; managedFloor?: string },
+    ): Promise<Announcement[]> {
         if (role === UserRole.SYS_ADMIN) {
             return this.findAll(skip, limit);
         }
 
-        // Map UserRole to AnnouncementTargetRole where applicable
-        // Logic: 'all' OR role specific target
-        let target = AnnouncementTargetRole.ALL;
-        if (role === UserRole.STUDENT_TEACHER) target = AnnouncementTargetRole.STUDENT_TEACHER;
-        if (role === UserRole.VENUE_ADMIN || role === UserRole.FLOOR_ADMIN) target = AnnouncementTargetRole.VENUE_ADMIN;
-
-        return this.announcementRepository.find({
-            where: [
-                { targetRole: AnnouncementTargetRole.ALL },
-                { targetRole: target }
-            ],
+        const all = await this.announcementRepository.find({
             order: { publishTime: 'DESC' },
             skip,
             take: limit,
         });
+
+        if (role === UserRole.STUDENT_TEACHER) {
+            return all.filter((item) => {
+                const roleHit = item.targetRole === AnnouncementTargetRole.ALL || item.targetRole === AnnouncementTargetRole.STUDENT_TEACHER;
+                return roleHit;
+            });
+        }
+
+        if (role === UserRole.VENUE_ADMIN || role === UserRole.FLOOR_ADMIN) {
+            const managedBuilding = (scope?.managedBuilding || '').trim();
+            const managedFloor = (scope?.managedFloor || '').trim();
+            if (!managedBuilding && !managedFloor) {
+                return [];
+            }
+
+            return all.filter((item) => {
+                if (item.targetRole !== AnnouncementTargetRole.VENUE_ADMIN) {
+                    return false;
+                }
+                const itemBuilding = (item.scopeBuilding || '').trim();
+                const itemFloor = (item.scopeFloor || '').trim();
+
+                const buildingHit = !managedBuilding || itemBuilding === managedBuilding;
+                const floorHit = !managedFloor || itemFloor === managedFloor;
+                return buildingHit && floorHit;
+            });
+        }
+
+        return [];
     }
 
-    async findLatestForRole(role: UserRole): Promise<Announcement | null> {
-        const list = await this.findForRole(role, 0, 1);
+    async findLatestForRole(
+        role: UserRole,
+        scope?: { managedBuilding?: string; managedFloor?: string },
+    ): Promise<Announcement | null> {
+        const list = await this.findForRole(role, 0, 100, scope);
         return list.length > 0 ? list[0] : null;
     }
 
@@ -52,6 +79,8 @@ export class AnnouncementsService {
             title: createAnnouncementDto.title,
             content: createAnnouncementDto.content,
             targetRole: createAnnouncementDto.target_role || AnnouncementTargetRole.ALL,
+            scopeBuilding: (createAnnouncementDto.scope_building || '').trim(),
+            scopeFloor: (createAnnouncementDto.scope_floor || '').trim(),
         });
         return this.announcementRepository.save(announcement);
     }
@@ -66,6 +95,12 @@ export class AnnouncementsService {
         announcement.content = updateAnnouncementDto.content;
         if (updateAnnouncementDto.target_role) {
             announcement.targetRole = updateAnnouncementDto.target_role;
+        }
+        if (Object.prototype.hasOwnProperty.call(updateAnnouncementDto, 'scope_building')) {
+            announcement.scopeBuilding = (updateAnnouncementDto.scope_building || '').trim();
+        }
+        if (Object.prototype.hasOwnProperty.call(updateAnnouncementDto, 'scope_floor')) {
+            announcement.scopeFloor = (updateAnnouncementDto.scope_floor || '').trim();
         }
 
         return this.announcementRepository.save(announcement);

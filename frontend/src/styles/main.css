@@ -181,9 +181,9 @@ html.dark .admin-toolbar__meta {
 
 /* --- THE ISLAND UI: FLOATING HEADERS --- */
 .el-dialog.glass-dialog .el-dialog__header {
-    background: rgba(255, 255, 255, 0.64);
-    backdrop-filter: blur(var(--glass-blur)) saturate(140%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     border: none !important;
     /* Zero Divider Header */
     border-radius: 40px;
@@ -208,31 +208,33 @@ html.dark .admin-toolbar__meta {
     background: var(--sheet-bg) !important;
     border: 1px solid var(--sheet-border) !important;
     box-shadow: 0 22px 56px rgba(0, 0, 0, 0.18) !important;
-    backdrop-filter: blur(var(--glass-blur-strong)) saturate(145%);
-    -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(145%);
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     position: fixed !important;
     left: 50% !important;
     top: calc(var(--dialog-safe-top) + ((100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom)) / 2)) !important;
     margin: 0 !important;
-    transform: translate(-50%, -50%) !important;
+    transform: translate(-50%, -50%) translateZ(0) !important;
+    will-change: transform, opacity;
+    backface-visibility: hidden;
     max-height: calc(100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom));
     display: flex;
     flex-direction: column;
 }
 
 .el-dialog.glass-dialog .el-dialog__body {
-    background: rgba(255, 255, 255, 0.16) !important;
+    background: rgba(255, 255, 255, 0.92) !important;
     padding: 10px 20px !important;
     overflow-y: auto;
     max-height: calc(100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom) - 140px);
 }
 
 html.dark .el-dialog.glass-dialog .el-dialog__header {
-    background: rgba(20, 23, 31, 0.74);
+    background: rgba(20, 23, 31, 0.96);
 }
 
 html.dark .el-dialog.glass-dialog .el-dialog__body {
-    background: rgba(0, 0, 0, 0.14) !important;
+    background: rgba(14, 17, 24, 0.94) !important;
 }
 
 .form-pill {
@@ -250,6 +252,16 @@ html.dark .el-dialog.glass-dialog .el-dialog__body {
     align-items: center !important;
     min-height: 56px;
     box-shadow: var(--glass-shadow);
+}
+
+.el-dialog.glass-dialog .form-pill {
+    background: rgba(255, 255, 255, 0.86) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+html.dark .el-dialog.glass-dialog .form-pill {
+    background: rgba(26, 30, 38, 0.86) !important;
 }
 
 .form-pill .el-form-item {
@@ -593,36 +605,77 @@ html.dark .el-table--enable-row-hover .el-table__body tr:hover > td.el-table__ce
 
 /* Overlay blur */
 .el-overlay {
-    backdrop-filter: blur(8px);
-    background: rgba(0, 0, 0, 0.18) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(7, 10, 16, 0.26) !important;
+    will-change: opacity;
+    contain: paint;
+}
+
+html.dark .el-overlay {
+    background: rgba(2, 4, 8, 0.44) !important;
+}
+
+.el-overlay .el-overlay-dialog {
+    will-change: opacity, transform;
+    backface-visibility: hidden;
+    transform: translateZ(0);
+    pointer-events: auto;
+}
+
+.el-dialog.glass-dialog {
+    pointer-events: auto;
 }
 
 .content-shell .el-overlay {
-    position: absolute !important;
+    position: fixed !important;
     inset: 0 !important;
-    border-radius: inherit;
+    border-radius: 0;
     overflow: hidden;
 }
 
 .content-shell .el-overlay .el-overlay-dialog {
-    position: absolute !important;
+    position: fixed !important;
     inset: 0 !important;
     overflow: hidden !important;
 }
 
 .content-shell .el-dialog.glass-dialog {
-    position: absolute !important;
+    position: fixed !important;
     background: var(--sheet-bg) !important;
     border: 1px solid var(--sheet-border) !important;
     left: 50% !important;
-    top: 50% !important;
-    transform: translate(-50%, -50%) !important;
+    top: calc(var(--dialog-safe-top) + ((100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom)) / 2)) !important;
+    transform: translate(-50%, -50%) translateZ(0) !important;
     margin: 0 !important;
-    max-height: calc(100% - 20px) !important;
+    max-height: calc(100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom)) !important;
 }
 
 .content-shell .el-dialog.glass-dialog .el-dialog__body {
-    max-height: calc(100% - 130px) !important;
+    max-height: calc(100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom) - 140px) !important;
+}
+
+.el-dialog .vibrant-glass-card .card-glass-substrate {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: rgba(255, 255, 255, 0.3) !important;
+    border: 1px solid rgba(255, 255, 255, 0.36) !important;
+}
+
+html.dark .el-dialog .vibrant-glass-card .card-glass-substrate {
+    background: rgba(26, 31, 43, 0.86) !important;
+    border-color: rgba(255, 255, 255, 0.16) !important;
+}
+
+.dialog-fade-enter-active .el-dialog.glass-dialog,
+.dialog-fade-leave-active .el-dialog.glass-dialog {
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.24s ease !important;
+}
+
+.dialog-fade-enter-from .el-dialog.glass-dialog,
+.dialog-fade-leave-to .el-dialog.glass-dialog {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 10px)) translateZ(0) scale(0.985) !important;
 }
 
 /* --- GLASS NOTIFICATIONS & DIALOGS --- */

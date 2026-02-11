@@ -88,17 +88,17 @@ defineEmits(['book', 'view-detail'])
 .card-glass-substrate {
     position: absolute;
     inset: 0;
-    backdrop-filter: blur(25px) saturate(180%);
-    -webkit-backdrop-filter: blur(25px) saturate(180%);
-    background: rgba(255, 255, 255, 0.05); /* Slight base tint */
-    border: none !important;
+    backdrop-filter: blur(10px) saturate(130%);
+    -webkit-backdrop-filter: blur(10px) saturate(130%);
+    background: rgba(255, 255, 255, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.28);
     border-radius: inherit;
     z-index: 1;
     transition: background 0.4s;
 }
 
 .vibrant-glass-card:hover .card-glass-substrate {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.3);
 }
 
 .card-content-row {
@@ -163,7 +163,7 @@ defineEmits(['book', 'view-detail'])
 
 .type-pill {
     font-size: 12px;
-    opacity: 0.6;
+    opacity: 0.82;
     font-weight: 500;
 }
 
@@ -171,7 +171,7 @@ defineEmits(['book', 'view-detail'])
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.38);
     padding: 6px 14px;
     border-radius: 20px;
     font-size: 13px;
@@ -181,7 +181,7 @@ defineEmits(['book', 'view-detail'])
 
 .micro-tag {
     font-size: 12px;
-    opacity: 0.5;
+    opacity: 0.8;
     margin-right: 8px;
 }
 
@@ -319,7 +319,33 @@ defineEmits(['book', 'view-detail'])
     }
 }
 
-html.dark .venue-name, html.dark .type-pill { color: #eee; }
-html.dark .info-pill { background: rgba(255,255,255,0.1); color: #ccc; }
-html.dark .match-reason-pill { background: rgba(0,0,0,0.3); color: #ccc; }
+html.dark .card-glass-substrate {
+    background: rgba(22, 26, 36, 0.78);
+    border-color: rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+}
+
+html.dark .vibrant-glass-card:hover .card-glass-substrate {
+    background: rgba(26, 31, 43, 0.84);
+}
+
+html.dark .venue-name,
+html.dark .type-pill {
+    color: #eef1f7;
+}
+
+html.dark .info-pill {
+    background: rgba(255, 255, 255, 0.18);
+    color: #d9ddea;
+}
+
+html.dark .micro-tag {
+    color: rgba(238, 242, 255, 0.8);
+}
+
+html.dark .match-reason-pill {
+    background: rgba(0, 0, 0, 0.3);
+    color: #ccc;
+}
 </style>

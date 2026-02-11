@@ -73,6 +73,7 @@ const formatDisplay = computed(() => {
         style="max-width: 380px"
         :teleported="false"
         :modal-append-to-body="false"
+        :lock-scroll="false"
         class="glass-dialog spatial-modal"
         title="选择时间"
         align-center

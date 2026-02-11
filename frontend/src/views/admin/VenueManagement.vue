@@ -4,9 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown } from '@element-plus/icons-vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const venues = ref([])
 const users = ref([])
 const showModal = ref(false)
@@ -34,11 +36,25 @@ const form = ref({
 
 const facilitiesOptions = ['投影仪', '音响设备', '白板', '电脑', '舞台']
 const isUserDismiss = (error) => error === 'cancel' || error === 'close'
+const role = computed(() => authStore.user?.role || '')
+const isSysAdmin = computed(() => role.value === 'sys_admin')
+const managedBuilding = computed(() => (authStore.user?.managed_building || authStore.user?.managedBuilding || '').toString().trim())
+const managedFloor = computed(() => (authStore.user?.managed_floor || authStore.user?.managedFloor || '').toString().trim())
 
 // 获取可分配为场地管理员的用户列表
 const venueAdmins = computed(() => {
   return users.value.filter(u => ['venue_admin', 'floor_admin'].includes(u.role))
 })
+
+const venueInScope = (venue) => {
+  if (isSysAdmin.value) return true
+  if (!['venue_admin', 'floor_admin'].includes(role.value)) return false
+  const building = String(venue?.building_name || '').trim()
+  const floor = String(venue?.floor_label || '').trim()
+  const byBuilding = !managedBuilding.value || managedBuilding.value === building
+  const byFloor = !managedFloor.value || managedFloor.value === floor
+  return byBuilding && byFloor
+}
 
 const fetchVenues = async () => {
   try {
@@ -48,6 +64,10 @@ const fetchVenues = async () => {
 }
 
 const fetchUsers = async () => {
+  if (!isSysAdmin.value) {
+    users.value = []
+    return
+  }
   try {
     const res = await api.get('/users/')
     users.value = res.data
@@ -69,7 +89,9 @@ watch(
     () => route.query.qa_ts,
     () => {
         if (route.query.qa === 'create-venue') {
-            openCreate()
+            if (isSysAdmin.value) {
+                openCreate()
+            }
             const nextQuery = { ...route.query }
             delete nextQuery.qa
             delete nextQuery.qa_ts
@@ -79,7 +101,17 @@ watch(
     { immediate: true }
 )
 
+watch(keyword, (value) => {
+    if (String(value || '').trim().length > 0) {
+        showBuildingView.value = false
+    }
+})
+
 function openCreate() {
+    if (!isSysAdmin.value) {
+        ElMessage.warning('仅系统管理员可新增场馆')
+        return
+    }
     isEdit.value = false
     currentId.value = null
     form.value = { 
@@ -222,24 +254,39 @@ const submitMaintenance = async () => {
 const filteredVenues = computed(() => {
     const kw = keyword.value.trim().toLowerCase()
     return venues.value.filter((venue) => {
+        if (!venueInScope(venue)) return false
         const statusHit = !statusFilter.value || venue.status === statusFilter.value
         if (!statusHit) return false
-        if (!kw) return true
-        return [
-            venue.name,
-            venue.building_name,
-            venue.location,
-            getAdminName(venue.admin_id),
-            String(venue.id)
-        ].some((item) => String(item || '').toLowerCase().includes(kw))
+        return matchesVenueKeyword(venue, kw)
     })
 })
+const isKeywordSearch = computed(() => keyword.value.trim().length > 0)
 
 const getVenueBuilding = (venue) => {
     if (venue?.building_name) return venue.building_name
     const text = (venue?.location || '').trim()
     if (!text) return '未分区'
     return text.split(/\s+/)[0] || '未分区'
+}
+
+const getVenueRoomKeyword = (venue) => {
+    return String(venue?.room_code || venue?.room_name || venue?.name || '').trim()
+}
+
+const matchesVenueKeyword = (venue, rawKeyword) => {
+    const kw = String(rawKeyword || '').trim().toLowerCase()
+    if (!kw) return true
+    const mergedKw = kw.replace(/\s+/g, '')
+    const building = getVenueBuilding(venue).toLowerCase()
+    const room = getVenueRoomKeyword(venue).toLowerCase()
+    const candidates = [
+        building,
+        room,
+        `${building}${room}`,
+        `${building} ${room}`,
+        `${building}-${room}`,
+    ]
+    return candidates.some((item) => item.includes(kw) || item.replace(/\s+/g, '').includes(mergedKw))
 }
 
 const groupedBuildings = computed(() => {
@@ -266,6 +313,16 @@ const groupedBuildings = computed(() => {
         .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 })
 
+const searchResultClassrooms = computed(() => {
+    return filteredVenues.value
+        .slice()
+        .sort((a, b) => {
+            const buildingCompare = getVenueBuilding(a).localeCompare(getVenueBuilding(b), 'zh-CN')
+            if (buildingCompare !== 0) return buildingCompare
+            return getVenueRoomKeyword(a).localeCompare(getVenueRoomKeyword(b), 'zh-CN')
+        })
+})
+
 const activeBuildingClassrooms = computed(() => {
     if (!selectedBuilding.value) return []
     const item = groupedBuildings.value.find((group) => group.name === selectedBuilding.value)
@@ -285,7 +342,7 @@ const openBuildingDetail = (buildingName) => {
         <el-input
           v-model="keyword"
           clearable
-          placeholder="搜索场馆 / 位置 / 管理员"
+          placeholder="搜索教室：楼 / 房间名 / 楼+房间名"
           class="toolbar-field toolbar-field--wide"
         />
         <el-select v-model="statusFilter" clearable placeholder="状态筛选" class="toolbar-field">
@@ -295,28 +352,87 @@ const openBuildingDetail = (buildingName) => {
         </el-select>
       </div>
       <div class="admin-toolbar__filters">
-        <span class="admin-toolbar__meta">共 {{ filteredVenues.length }} / {{ venues.length }} 个场馆</span>
-        <el-button type="primary" @click="openCreate">新增场馆</el-button>
+        <span class="admin-toolbar__meta">共 {{ filteredVenues.length }} 个场馆</span>
+        <el-button v-if="isSysAdmin" type="primary" @click="openCreate">新增场馆</el-button>
       </div>
     </div>
 
-    <div class="building-grid">
-      <el-card v-for="building in groupedBuildings" :key="building.name" shadow="never" class="building-card app-panel">
-        <div class="building-card__head">
-          <div>
-            <div class="building-name">{{ building.name }}</div>
-            <div class="building-meta">共 {{ building.total }} 间教室</div>
+    <template v-if="!isKeywordSearch">
+      <div class="building-grid">
+        <el-card v-for="building in groupedBuildings" :key="building.name" shadow="never" class="building-card app-panel">
+          <div class="building-card__head">
+            <div>
+              <div class="building-name">{{ building.name }}</div>
+              <div class="building-meta">共 {{ building.total }} 间教室</div>
+            </div>
+            <el-button size="small" type="primary" plain @click="openBuildingDetail(building.name)">查看教室</el-button>
           </div>
-          <el-button size="small" type="primary" plain @click="openBuildingDetail(building.name)">查看教室</el-button>
+          <div class="building-card__stats">
+            <span class="stat-pill ok">空闲 {{ building.available }}</span>
+            <span class="stat-pill warn">维护 {{ building.maintenance }}</span>
+            <span class="stat-pill">总数 {{ building.total }}</span>
+          </div>
+        </el-card>
+      </div>
+      <el-empty v-if="groupedBuildings.length === 0" description="没有符合条件的楼栋" />
+    </template>
+
+    <el-card v-else shadow="never" class="glass-panel app-panel venue-search-results">
+      <template #header>
+        <div class="panel-header">
+          <span>匹配教室结果</span>
+          <el-tag size="small" effect="plain" round>{{ searchResultClassrooms.length }} 条</el-tag>
         </div>
-        <div class="building-card__stats">
-          <span class="stat-pill ok">空闲 {{ building.available }}</span>
-          <span class="stat-pill warn">维护 {{ building.maintenance }}</span>
-          <span class="stat-pill">总数 {{ building.total }}</span>
-        </div>
-      </el-card>
-    </div>
-    <el-empty v-if="groupedBuildings.length === 0" description="没有符合条件的楼栋" />
+      </template>
+      <div class="venue-grid">
+        <el-card v-for="venue in searchResultClassrooms" :key="venue.id" shadow="never" class="venue-compact-card app-panel">
+          <div class="venue-head">
+            <div class="venue-title-wrap">
+              <h3>{{ venue.name }}</h3>
+              <span class="venue-id">#{{ venue.id }}</span>
+            </div>
+            <el-tag :type="venue.status === 'available' ? 'success' : 'danger'" effect="dark" size="small">
+              {{ venue.status === 'available' ? '可用' : '维护中' }}
+            </el-tag>
+          </div>
+
+          <div class="venue-pill-row">
+            <span class="meta-pill">{{ getVenueBuilding(venue) }}</span>
+            <span class="meta-pill">{{ venue.floor_label || '未知楼层' }}</span>
+            <span class="meta-pill">{{ venue.room_code || venue.room_name || venue.location || '房间未填' }}</span>
+            <span class="meta-pill">{{ venue.capacity }} 人</span>
+            <span class="meta-pill">管理员：{{ getAdminName(venue.admin_id) }}</span>
+          </div>
+
+          <div class="venue-pill-row" v-if="venue.open_hours">
+            <span class="meta-pill meta-pill--wide">开放时间：{{ venue.open_hours }}</span>
+          </div>
+
+          <div class="venue-pill-row" v-if="venue.facilities.length > 0">
+            <el-tag v-for="f in venue.facilities" :key="f" size="small" type="info" effect="plain">{{ f }}</el-tag>
+          </div>
+
+          <div class="venue-actions">
+            <el-button size="small" type="primary" plain @click="openEdit(venue)">编辑</el-button>
+            <el-dropdown trigger="click">
+              <el-button size="small" type="warning" plain>
+                维护 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="openMaintenance(venue)">预约维护</el-dropdown-item>
+                  <el-dropdown-item @click="toggleStatus(venue)">
+                    {{ venue.status === 'available' ? '立即设为不可用' : '立即恢复可用' }}
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-button size="small" type="danger" plain @click="handleDelete(venue)">删除</el-button>
+          </div>
+        </el-card>
+      </div>
+      <el-empty v-if="searchResultClassrooms.length === 0" description="没有匹配到教室" />
+    </el-card>
 
     <el-dialog
       v-model="showBuildingView"
@@ -324,6 +440,7 @@ const openBuildingDetail = (buildingName) => {
       width="820px"
       :teleported="false"
       :modal-append-to-body="false"
+      :lock-scroll="false"
       class="glass-dialog"
     >
       <div class="venue-grid">
@@ -380,7 +497,7 @@ const openBuildingDetail = (buildingName) => {
     </el-dialog>
 
     <!-- Create/Edit Modal -->
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
         <el-form :model="form" label-width="100px">
             <el-row :gutter="20">
               <el-col :span="12">
@@ -478,7 +595,7 @@ const openBuildingDetail = (buildingName) => {
     </el-dialog>
 
     <!-- Maintenance Schedule Modal -->
-    <el-dialog v-model="showMaintenanceModal" title="预约维护时段" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+    <el-dialog v-model="showMaintenanceModal" title="预约维护时段" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
         <el-form :model="maintenanceForm" label-width="80px">
             <el-form-item label="原因">
                 <el-input v-model="maintenanceForm.reason" placeholder="例如：设备检修" />
@@ -515,10 +632,22 @@ const openBuildingDetail = (buildingName) => {
     --toolbar-field-width: 240px;
 }
 
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-weight: 600;
+}
+
 .building-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 12px;
+}
+
+.venue-search-results {
+    margin-top: 12px;
 }
 
 .building-card {

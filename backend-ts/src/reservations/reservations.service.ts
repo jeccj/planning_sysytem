@@ -447,21 +447,18 @@ export class ReservationsService {
         if (actor.role === UserRole.VENUE_ADMIN) {
             const requiredBuilding = (actor.managedBuilding || '').trim();
             const requiredFloor = (actor.managedFloor || '').trim();
-            if (requiredBuilding || requiredFloor) {
-                const parsed = parseVenueLocation(reservation.venue?.location, reservation.venue?.name);
-                const venueBuilding = reservation.venue?.buildingName || parsed.buildingName;
-                const venueFloor = reservation.venue?.floorLabel || parsed.floorLabel;
-                if (requiredBuilding && requiredBuilding !== venueBuilding) {
-                    throw new ForbiddenException('No permission to manage this building reservation');
-                }
-                if (requiredFloor && requiredFloor !== venueFloor) {
-                    throw new ForbiddenException('No permission to manage this floor reservation');
-                }
-                return;
+            if (!requiredBuilding && !requiredFloor) {
+                throw new ForbiddenException('Venue admin scope is not configured');
             }
 
-            if (reservation.venue?.adminId !== actor.id) {
-                throw new ForbiddenException('No permission to manage this venue reservation');
+            const parsed = parseVenueLocation(reservation.venue?.location, reservation.venue?.name);
+            const venueBuilding = reservation.venue?.buildingName || parsed.buildingName;
+            const venueFloor = reservation.venue?.floorLabel || parsed.floorLabel;
+            if (requiredBuilding && requiredBuilding !== venueBuilding) {
+                throw new ForbiddenException('No permission to manage this building reservation');
+            }
+            if (requiredFloor && requiredFloor !== venueFloor) {
+                throw new ForbiddenException('No permission to manage this floor reservation');
             }
             return;
         }

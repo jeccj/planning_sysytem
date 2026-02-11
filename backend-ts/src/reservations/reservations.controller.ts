@@ -26,12 +26,10 @@ export class ReservationsController {
         @Query('limit') limit: string = '100',
     ): Promise<ReservationResponseDto[]> {
         const filter = user.role === UserRole.VENUE_ADMIN
-            ? (((user.managedBuilding || '').trim() || (user.managedFloor || '').trim())
-                ? {
-                    buildingName: (user.managedBuilding || '').trim() || undefined,
-                    floorLabel: (user.managedFloor || '').trim() || undefined,
-                }
-                : { adminId: user.id })
+            ? {
+                buildingName: (user.managedBuilding || '').trim() || (((user.managedFloor || '').trim()) ? undefined : '__NO_SCOPE__'),
+                floorLabel: (user.managedFloor || '').trim() || undefined,
+            }
             : (user.role === UserRole.FLOOR_ADMIN
                 ? {
                     buildingName: (user.managedBuilding || '').trim() || (((user.managedFloor || '').trim()) ? undefined : '__NO_SCOPE__'),

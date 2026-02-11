@@ -303,7 +303,7 @@ const submitCreate = async () => {
         <el-empty v-if="filteredUsers.length === 0" description="没有符合条件的用户" />
 
         <!-- 编辑用户弹窗 -->
-        <el-dialog v-model="showModal" title="编辑用户" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+        <el-dialog v-model="showModal" title="编辑用户" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
             <el-form :model="editForm" label-width="80px">
                 <el-form-item label="用户名">
                     <el-input v-model="editForm.username" disabled />
@@ -342,7 +342,7 @@ const submitCreate = async () => {
         </el-dialog>
 
         <!-- 发送通知弹窗 -->
-        <el-dialog v-model="showNotifyModal" title="发送通知" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+        <el-dialog v-model="showNotifyModal" title="发送通知" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
             <el-alert type="info" :closable="false" style="margin-bottom: 20px;">
                 向用户 <strong>{{ notifyForm.username }}</strong> 发送系统通知
             </el-alert>
@@ -366,7 +366,7 @@ const submitCreate = async () => {
         </el-dialog>
 
         <!-- 新增用户弹窗 -->
-        <el-dialog v-model="showCreateModal" title="新增用户" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+        <el-dialog v-model="showCreateModal" title="新增用户" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
             <el-form :model="createForm" label-width="80px">
                 <el-form-item label="用户名">
                     <el-input v-model="createForm.username" placeholder="学号/工号" />

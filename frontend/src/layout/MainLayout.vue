@@ -25,6 +25,16 @@ const authStore = useAuthStore()
 const activeMenu = computed(() => route.path)
 const userRole = computed(() => authStore.user?.role)
 const showLlmStatusIsland = computed(() => route.path.includes('/student/dashboard'))
+const hasManagedScope = computed(() => {
+    const building = (authStore.user?.managed_building || '').trim()
+    const floor = (authStore.user?.managed_floor || '').trim()
+    return !!building || !!floor
+})
+const canAccessVenueTab = computed(() => {
+    if (userRole.value === 'sys_admin') return true
+    if (['venue_admin', 'floor_admin'].includes(userRole.value)) return hasManagedScope.value
+    return false
+})
 
 const showNotice = ref(false)
 const latestAnnouncement = ref(null)
@@ -156,10 +166,26 @@ const userRoleLabel = computed(() => {
     return '师生用户'
 })
 
+const getNoticeSeenStorageKey = () => {
+    const userId = authStore.user?.id
+    if (!userId) return 'noticeSeenId:anonymous'
+    return `noticeSeenId:user:${userId}`
+}
+
+const getSeenAnnouncementId = () => {
+    const key = getNoticeSeenStorageKey()
+    return localStorage.getItem(key) || ''
+}
+
+const setSeenAnnouncementId = (announcementId) => {
+    const key = getNoticeSeenStorageKey()
+    localStorage.setItem(key, String(announcementId))
+}
+
 const handleNoticeConfirm = () => {
     showNotice.value = false
     if (latestAnnouncement.value?.id) {
-        sessionStorage.setItem('noticeShownId', String(latestAnnouncement.value.id))
+        setSeenAnnouncementId(latestAnnouncement.value.id)
     }
 }
 
@@ -172,7 +198,13 @@ const fetchLatestAnnouncement = async () => {
     try {
         const res = await api.get('/announcements/latest')
         latestAnnouncement.value = res.data
-        const shownId = sessionStorage.getItem('noticeShownId')
+        let shownId = getSeenAnnouncementId()
+        // Backward compatibility for old session marker
+        const legacyShownId = sessionStorage.getItem('noticeShownId')
+        if (!shownId && legacyShownId) {
+            setSeenAnnouncementId(legacyShownId)
+            shownId = legacyShownId
+        }
         if (!shownId || shownId !== String(res.data.id)) {
             showNotice.value = true
         }
@@ -255,7 +287,7 @@ const handleLogout = () => {
               <span>概览</span>
             </el-menu-item>
 
-             <el-menu-item index="/admin/venues">
+             <el-menu-item v-if="canAccessVenueTab" index="/admin/venues">
               <el-icon><Operation /></el-icon>
               <span>场馆</span>
             </el-menu-item>
@@ -380,7 +412,7 @@ const handleLogout = () => {
     </el-container>
 
     <!-- Notice Dialog -->
-    <el-dialog v-model="showNotice" title="系统公告" width="520px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false">
+    <el-dialog v-model="showNotice" title="系统公告" width="520px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false" :lock-scroll="false">
         <div v-if="latestAnnouncement" class="notice-body">
             <h3 class="notice-title">{{ latestAnnouncement.title }}</h3>
             <div class="notice-time">发布时间：{{ formatTime(latestAnnouncement.publish_time) }}</div>
@@ -393,7 +425,7 @@ const handleLogout = () => {
     </el-dialog>
 
     <!-- Change Password Dialog (Force) -->
-    <el-dialog v-model="showChangePwd" title="⚠️ 安全提醒：请修改初始密码" width="400px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false">
+    <el-dialog v-model="showChangePwd" title="⚠️ 安全提醒：请修改初始密码" width="400px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false" :lock-scroll="false">
         <p style="color:red; margin-bottom:15px;">您正在使用初始密码，为了账号安全，请立即修改密码。</p>
         <el-form :model="pwdForm" label-position="top">
             <el-form-item label="旧密码">
@@ -682,15 +714,15 @@ html.dark .status-text { color: #eee; }
     right: calc(100% + 8px);
     top: 0;
     z-index: 911;
-    background: rgba(255, 255, 255, 0.86) !important;
-    border: 1px solid rgba(255, 255, 255, 0.84) !important;
+    background: rgba(255, 255, 255, 0.74) !important;
+    border: 1px solid rgba(255, 255, 255, 0.62) !important;
     backdrop-filter: blur(20px) saturate(145%);
     -webkit-backdrop-filter: blur(20px) saturate(145%);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
 }
 
 html.dark .user-menu-island {
-    background: rgba(19, 22, 30, 0.9) !important;
+    background: rgba(19, 22, 30, 0.76) !important;
     border: 1px solid rgba(255, 255, 255, 0.18) !important;
     box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
 }
@@ -785,7 +817,7 @@ html.dark .menu-item:hover {
     overflow: hidden;
     flex-direction: column;
     cursor: default;
-    background: rgba(255, 255, 255, 0.9) !important;
+    background: rgba(255, 255, 255, 0.78) !important;
     border: 1px solid rgba(255, 255, 255, 0.86) !important;
     backdrop-filter: blur(22px) saturate(145%);
     -webkit-backdrop-filter: blur(22px) saturate(145%);
@@ -793,7 +825,7 @@ html.dark .menu-item:hover {
 }
 
 html.dark .notification-panel {
-    background: rgba(17, 20, 28, 0.92) !important;
+    background: rgba(17, 20, 28, 0.8) !important;
     border: 1px solid rgba(255, 255, 255, 0.18) !important;
     box-shadow: 0 18px 38px rgba(0, 0, 0, 0.48);
 }
@@ -908,8 +940,8 @@ html.dark .notification-content {
 .glass-pill {
     background: linear-gradient(
       150deg,
-      rgba(255, 255, 255, 0.74) 0%,
-      rgba(241, 243, 250, 0.62) 100%
+      rgba(255, 255, 255, 0.58) 0%,
+      rgba(241, 243, 250, 0.46) 100%
     );
     backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
     -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
@@ -934,8 +966,8 @@ html.dark .notification-content {
 html.dark .glass-pill {
     background: linear-gradient(
       150deg,
-      rgba(26, 30, 38, 0.84) 0%,
-      rgba(19, 22, 30, 0.78) 100%
+      rgba(26, 30, 38, 0.68) 0%,
+      rgba(19, 22, 30, 0.62) 100%
     );
     border: 1px solid var(--glass-surface-border);
     color: #fff;
@@ -1193,7 +1225,8 @@ html.dark :deep(.el-menu-item.is-active) {
         ) !important;
         backdrop-filter: blur(36px) saturate(155%);
         -webkit-backdrop-filter: blur(36px) saturate(155%);
-        transition: transform 0.38s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.34s cubic-bezier(0.22, 1, 0.36, 1), background 0.34s cubic-bezier(0.22, 1, 0.36, 1), height 0.34s cubic-bezier(0.22, 1, 0.36, 1), width 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+        transition: transform 0.3s ease, box-shadow 0.28s ease, background 0.28s ease, height 0.28s ease, width 0.28s ease;
+        will-change: width, height, box-shadow, background;
         z-index: 2200;
         overflow: hidden;
     }
@@ -1206,15 +1239,11 @@ html.dark :deep(.el-menu-item.is-active) {
         width: min(226px, calc(100% - 146px)) !important;
     }
 
-    .aside-menu:active {
-        transform: translateX(calc(-50% - 2px)) translateY(-1px) scale(0.985);
-    }
-
     .aside-menu:hover {
         width: min(392px, calc(100% - 24px)) !important;
-        height: 70px;
+        height: 66px;
         align-items: center !important;
-        transform: translateX(calc(-50% + 3px)) translateY(-5px) scale(1.01);
+        transform: translateX(-50%) translateY(-2px);
         background: linear-gradient(
             150deg,
             rgba(249, 250, 254, 0.66) 0%,
@@ -1276,7 +1305,7 @@ html.dark :deep(.el-menu-item.is-active) {
         justify-content: center;
         align-items: center;
         gap: 2px;
-        transition: background 0.32s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.28s ease;
+        transition: background 0.24s ease, transform 0.24s ease, box-shadow 0.24s ease;
     }
 
     :deep(.el-menu-item .el-icon),
@@ -1313,7 +1342,7 @@ html.dark :deep(.el-menu-item.is-active) {
 
     :deep(.el-menu-item:hover),
     .aside-menu:hover :deep(.el-menu-item:hover) {
-        transform: translateY(-1px) translateX(1px);
+        transform: translateY(-1px);
         background-color: rgba(255, 255, 255, 0.18) !important;
     }
 
@@ -1321,7 +1350,7 @@ html.dark :deep(.el-menu-item.is-active) {
         background: rgba(255, 255, 255, 0.94) !important;
         color: #111 !important;
         box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
-        transform: translateY(-1px) translateX(1px);
+        transform: translateY(-1px);
     }
 
     html.dark :deep(.el-menu-item) {
@@ -1339,39 +1368,42 @@ html.dark :deep(.el-menu-item.is-active) {
 
     .header-left-group {
         left: 10px;
-        top: 8px;
+        top: 10px;
         max-width: calc(100vw - 140px);
         gap: 5px;
     }
 
     .header-left {
-        max-width: calc(100vw - 168px);
-        padding-inline: 12px !important;
+        max-width: calc(100vw - 170px);
+        min-height: 42px;
+        padding: 8px 14px !important;
     }
 
     .header-left .page-title {
-        font-size: 13px;
+        font-size: 14px;
+        line-height: 1.2;
     }
 
     .header-right-container {
         right: 12px;
-        top: 8px;
+        top: 10px;
         align-items: flex-end;
     }
 
     .header-right {
-        max-width: 124px;
-        padding: 6px 8px !important;
+        max-width: 138px;
+        min-height: 42px;
+        padding: 8px 10px !important;
     }
 
     .header-right .username {
-        font-size: 11px;
-        max-width: 62px;
+        font-size: 12px;
+        max-width: 72px;
     }
 
     .header-right .user-role-inline {
         display: block;
-        font-size: 9px;
+        font-size: 9.5px;
     }
 
     .user-menu-island {
@@ -1405,7 +1437,7 @@ html.dark :deep(.el-menu-item.is-active) {
         top: 17px !important;
         padding: 4px 9px !important;
         min-width: 0 !important;
-        background: rgba(255, 255, 255, 0.66) !important;
+        background: rgba(255, 255, 255, 0.52) !important;
         backdrop-filter: blur(16px) saturate(145%) !important;
         -webkit-backdrop-filter: blur(16px) saturate(145%) !important;
         border: 1px solid rgba(255, 255, 255, 0.72) !important;
@@ -1414,7 +1446,7 @@ html.dark :deep(.el-menu-item.is-active) {
     }
 
     html.dark .status-island {
-        background: rgba(18, 21, 29, 0.86) !important;
+        background: rgba(18, 21, 29, 0.72) !important;
         border: 1px solid rgba(255, 255, 255, 0.2) !important;
         box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38) !important;
     }
@@ -1476,6 +1508,39 @@ html.dark :deep(.el-menu-item.is-active) {
     .aside-menu:hover :deep(.el-menu-item span) {
         font-size: 10px;
         white-space: nowrap;
+    }
+}
+
+@media (max-width: 768px) and (hover: none), (max-width: 768px) and (pointer: coarse) {
+    .aside-menu,
+    .aside-menu:hover {
+        height: 58px !important;
+        min-height: 58px !important;
+        transform: translateX(-50%) !important;
+    }
+
+    .aside-menu:hover {
+        width: min(392px, calc(100% - 24px)) !important;
+        box-shadow:
+            0 12px 34px rgba(0, 0, 0, 0.16),
+            inset 0 1px 0 rgba(255, 255, 255, 0.52) !important;
+    }
+
+    .aside-menu.aside-menu--compact,
+    .aside-menu.aside-menu--compact:hover {
+        width: min(180px, calc(100% - 192px)) !important;
+    }
+
+    .aside-menu:hover :deep(.el-menu-item span) {
+        opacity: 0;
+        max-height: 0;
+        transform: none;
+        transition-delay: 0s;
+    }
+
+    :deep(.el-menu-item:hover),
+    .aside-menu:hover :deep(.el-menu-item:hover) {
+        transform: none;
     }
 }
 </style>

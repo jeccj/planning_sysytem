@@ -20,20 +20,28 @@ export class AnnouncementsController {
         @Query('skip') skip: string = '0',
         @Query('limit') limit: string = '100',
     ): Promise<AnnouncementResponseDto[]> {
-        const announcements = await this.announcementsService.findForRole(user.role, +skip, +limit);
+        const announcements = await this.announcementsService.findForRole(user.role, +skip, +limit, {
+            managedBuilding: user.managedBuilding,
+            managedFloor: user.managedFloor,
+        });
         return announcements.map(a => ({
             id: a.id,
             title: a.title,
             content: a.content,
             publish_time: a.publishTime,
             target_role: a.targetRole,
+            scope_building: a.scopeBuilding,
+            scope_floor: a.scopeFloor,
         }));
     }
 
     @Get('latest')
     @UseGuards(JwtAuthGuard)
     async findLatest(@CurrentUser() user: User): Promise<AnnouncementResponseDto> {
-        const item = await this.announcementsService.findLatestForRole(user.role);
+        const item = await this.announcementsService.findLatestForRole(user.role, {
+            managedBuilding: user.managedBuilding,
+            managedFloor: user.managedFloor,
+        });
         if (!item) {
             throw new HttpException('Announcement not found', HttpStatus.NOT_FOUND);
         }
@@ -43,6 +51,8 @@ export class AnnouncementsController {
             content: item.content,
             publish_time: item.publishTime,
             target_role: item.targetRole,
+            scope_building: item.scopeBuilding,
+            scope_floor: item.scopeFloor,
         };
     }
 
@@ -57,6 +67,8 @@ export class AnnouncementsController {
             content: a.content,
             publish_time: a.publishTime,
             target_role: a.targetRole,
+            scope_building: a.scopeBuilding,
+            scope_floor: a.scopeFloor,
         };
     }
 
@@ -75,6 +87,8 @@ export class AnnouncementsController {
                 content: a.content,
                 publish_time: a.publishTime,
                 target_role: a.targetRole,
+                scope_building: a.scopeBuilding,
+                scope_floor: a.scopeFloor,
             };
         } catch (error) {
             throw new HttpException('Announcement not found', HttpStatus.NOT_FOUND);

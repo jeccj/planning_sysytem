@@ -208,7 +208,7 @@ const formatDateTime = (value) => {
     </div>
 
     <!-- 预约详情弹窗 -->
-    <el-dialog v-model="showDetailDialog" title="预约详情" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+    <el-dialog v-model="showDetailDialog" title="预约详情" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
         <div v-if="selectedReservation" class="detail-content">
             <div class="detail-item">
                 <span class="label">活动名称</span>

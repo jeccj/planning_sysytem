@@ -1,0 +1,5 @@
+name,type,capacity,building_name,floor_label,room_code,facilities,status,open_hours,description,admin_username
+明德楼101,Classroom,48,明德楼,1层,101,"投影仪;白板",available,周一至周日 08:00-22:00,标准化教室,venue_admin_mingde
+明德楼102,Classroom,48,明德楼,1层,102,"投影仪;白板",available,周一至周日 08:00-22:00,标准化教室,venue_admin_mingde
+明德楼201,Classroom,56,明德楼,2层,201,"投影仪;音响设备;白板",available,周一至周日 08:00-22:00,标准化教室,venue_admin_mingde
+文体中心多功能厅,Hall,220,文体中心,1层,多功能厅,"音响设备;舞台",available,周一至周日 08:00-22:00,大型活动场地,venue_admin_wenti

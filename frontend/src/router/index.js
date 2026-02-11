@@ -96,6 +96,10 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
     const authStore = useAuthStore()
+    const role = authStore.user?.role
+    const managedBuilding = (authStore.user?.managed_building || '').trim()
+    const managedFloor = (authStore.user?.managed_floor || '').trim()
+    const hasManagedScope = !!managedBuilding || !!managedFloor
 
     if (to.meta.requiresAuth && !authStore.isAuthenticated) {
         next('/login')
@@ -108,6 +112,11 @@ router.beforeEach((to, from, next) => {
             next('/')
             return
         }
+    }
+
+    if (to.path === '/admin/venues' && ['venue_admin', 'floor_admin'].includes(role) && !hasManagedScope) {
+        next('/admin/dashboard')
+        return
     }
 
     next()
