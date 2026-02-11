@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import api from '../api/axios'
@@ -11,8 +11,9 @@ import {
   UserFilled,
   House,
   CircleCheck,
-  SwitchButton,
-  Bell
+  Bell,
+  Operation,
+  ArrowDown
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -23,6 +24,7 @@ const authStore = useAuthStore()
 
 const activeMenu = computed(() => route.path)
 const userRole = computed(() => authStore.user?.role)
+const showLlmStatusIsland = computed(() => route.path.includes('/student/dashboard'))
 
 const showNotice = ref(false)
 const latestAnnouncement = ref(null)
@@ -33,6 +35,7 @@ const pwdForm = ref({ old_password: '', new_password: '', confirm_password: '' }
 const unreadNotificationCount = ref(0)
 const showNotificationPanel = ref(false)
 const notifications = ref([])
+let unreadCountTimer = null
 
 const fetchUnreadCount = async () => {
     try {
@@ -55,6 +58,7 @@ const fetchNotifications = async () => {
 const toggleNotificationPanel = async () => {
     showNotificationPanel.value = !showNotificationPanel.value
     if (showNotificationPanel.value) {
+        showUserMenu.value = true
         await fetchNotifications()
     }
 }
@@ -87,8 +91,10 @@ onMounted(() => {
         showChangePwd.value = true
     }
 
-    // Check API Status
-    checkApiStatus()
+    // Check LLM status only when smart search is relevant
+    if (showLlmStatusIsland.value) {
+        checkLlmStatus()
+    }
 
     // Load latest announcement
     fetchLatestAnnouncement()
@@ -97,24 +103,36 @@ onMounted(() => {
     fetchUnreadCount()
     
     // 定时刷新未读通知数
-    setInterval(fetchUnreadCount, 60000) // 每分钟刷新一次
+    unreadCountTimer = setInterval(fetchUnreadCount, 60000) // 每分钟刷新一次
 })
 
-const apiStatus = ref('loading') // 'connected', 'error', 'loading'
+watch(
+    () => route.path,
+    () => {
+        if (showLlmStatusIsland.value) {
+            checkLlmStatus()
+        }
+    }
+)
 
-const checkApiStatus = async () => {
+onUnmounted(() => {
+    if (unreadCountTimer) {
+        clearInterval(unreadCountTimer)
+        unreadCountTimer = null
+    }
+})
+
+const llmStatus = ref('loading') // 'connected', 'error', 'loading'
+
+const checkLlmStatus = async () => {
     try {
-        await api.get('/')
-        apiStatus.value = 'connected'
+        await api.post('/nlp/parse', { query: '状态检测' })
+        llmStatus.value = 'connected'
     } catch (e) {
-        console.error("API Ping Failed", e)
-        apiStatus.value = 'error'
+        console.error('LLM status check failed', e)
+        llmStatus.value = 'error'
     }
 }
-
-const initialPassword = computed(() => {
-    return "默认密码为身份证后六位" 
-})
 
 const pageTitle = computed(() => {
     const p = route.path
@@ -123,10 +141,19 @@ const pageTitle = computed(() => {
     if (p.includes('/admin/audit')) return '预约审核'
     if (p.includes('/admin/users')) return '用户管理'
     if (p.includes('/admin/announcements')) return '公告管理'
+    if (p.includes('/admin/settings')) return '系统设置'
     if (p.includes('/announcements')) return '公告中心'
     if (p.includes('/student/dashboard')) return '场馆查询'
     if (p.includes('/student/reservations')) return '我的预约'
     return '控制台'
+})
+
+const userRoleLabel = computed(() => {
+    const role = authStore.user?.role
+    if (role === 'sys_admin') return '系统管理员'
+    if (role === 'floor_admin') return '楼层管理员'
+    if (role === 'venue_admin') return '场馆管理员'
+    return '师生用户'
 })
 
 const handleNoticeConfirm = () => {
@@ -179,25 +206,14 @@ const showUserMenu = ref(false)
 
 const toggleUserMenu = () => {
     showUserMenu.value = !showUserMenu.value
-}
-
-const closeUserMenu = () => {
-    showUserMenu.value = false
-}
-
-// Simple Click Outside Directive
-const vClickOutside = {
-    mounted(el, binding) {
-        el.clickOutsideEvent = function(event) {
-            if (!(el === event.target || el.contains(event.target))) {
-                binding.value(event, el);
-            }
-        };
-        document.body.addEventListener('click', el.clickOutsideEvent);
-    },
-    unmounted(el) {
-        document.body.removeEventListener('click', el.clickOutsideEvent);
+    if (!showUserMenu.value) {
+        showNotificationPanel.value = false
     }
+}
+
+const closeFloatingPanels = () => {
+    showUserMenu.value = false
+    showNotificationPanel.value = false
 }
 
 const handleLogout = () => {
@@ -207,9 +223,9 @@ const handleLogout = () => {
 </script>
 
 <template>
-  <div class="common-layout">
+  <div class="common-layout" @click="closeFloatingPanels">
     <el-container class="layout-container">
-      <el-aside width="auto" class="aside-menu">
+      <el-aside width="auto" :class="['aside-menu', { 'aside-menu--compact': userRole === 'student_teacher' }]">
         <div class="logo">
           <h3>校园场馆预约系统</h3>
         </div>
@@ -233,15 +249,15 @@ const handleLogout = () => {
           </template>
 
           <!-- Admin Menu -->
-          <template v-if="['venue_admin', 'sys_admin'].includes(userRole)">
+          <template v-if="['venue_admin', 'floor_admin', 'sys_admin'].includes(userRole)">
              <el-menu-item index="/admin/dashboard">
               <el-icon><House /></el-icon>
               <span>概览</span>
             </el-menu-item>
 
              <el-menu-item index="/admin/venues">
-              <el-icon><Setting /></el-icon>
-              <span>设置</span>
+              <el-icon><Operation /></el-icon>
+              <span>场馆</span>
             </el-menu-item>
 
              <el-menu-item index="/admin/audit">
@@ -254,10 +270,15 @@ const handleLogout = () => {
               <span>用户</span>
             </el-menu-item>
 
-                        <el-menu-item index="/admin/announcements" v-if="userRole === 'sys_admin'">
-                            <el-icon><IconMenu /></el-icon>
-                            <span>公告</span>
-                        </el-menu-item>
+            <el-menu-item index="/admin/announcements" v-if="userRole === 'sys_admin'">
+                <el-icon><IconMenu /></el-icon>
+                <span>公告</span>
+            </el-menu-item>
+
+            <el-menu-item index="/admin/settings" v-if="userRole === 'sys_admin'">
+                <el-icon><Setting /></el-icon>
+                <span>设置</span>
+            </el-menu-item>
           </template>
           
           </el-menu>
@@ -265,88 +286,95 @@ const handleLogout = () => {
       
       <el-container>
         <el-header class="header">
-          <!-- Left Island: Page Title -->
-          <div class="header-left glass-pill">
-            <span class="page-title">{{ pageTitle }}</span>
-          </div>
-          
-          <!-- Center Island: System Status -->
-          <div class="status-island glass-pill" :title="apiStatus === 'connected' ? 'System Online' : 'System Offline'">
-              <div class="status-dot" :class="apiStatus"></div>
-              <span class="status-text">{{ apiStatus === 'connected' ? 'Online' : 'Offline' }}</span>
-          </div>
-          
-          <!-- Notification Bell -->
-          <div class="notification-container" @mouseenter="showNotificationPanel = true" @mouseleave="showNotificationPanel = false">
-            <div class="notification-bell glass-pill" @click="toggleNotificationPanel">
-                <el-badge :value="unreadNotificationCount" :hidden="unreadNotificationCount === 0" :max="99">
-                    <el-icon :size="20"><Bell /></el-icon>
-                </el-badge>
+          <div class="header-left-group">
+            <div class="header-left glass-pill">
+              <span class="page-title">{{ pageTitle }}</span>
             </div>
-            
-            <!-- Notification Panel -->
-            <transition name="island-pop">
-                <div v-if="showNotificationPanel" class="notification-panel glass-pill">
-                    <div class="notification-header">
-                        <span>消息通知</span>
-                        <el-button v-if="notifications.length > 0" text size="small" @click="markAllAsRead">全部已读</el-button>
-                    </div>
-                    <div class="notification-list" v-if="notifications.length > 0">
-                        <div 
-                            v-for="item in notifications" 
-                            :key="item.id" 
-                            class="notification-item"
-                            :class="{ 'is-unread': !item.is_read }"
-                            @click="markAsRead(item)"
-                        >
-                            <div class="notification-title">{{ item.title }}</div>
-                            <div class="notification-content">{{ item.content }}</div>
-                            <div class="notification-time">{{ formatTime(item.created_at) }}</div>
-                        </div>
-                    </div>
-                    <div v-else class="notification-empty">
-                        暂无通知
-                    </div>
-                </div>
-            </transition>
           </div>
-          
-          <!-- Right Island: User Profile -->
-          <div class="header-right-container" @mouseenter="showUserMenu = true" @mouseleave="showUserMenu = false">
-            <div class="header-right glass-pill">
-                <el-avatar 
-                  :size="28" 
+
+          <!-- Center Island: System Status -->
+          <div
+            v-if="showLlmStatusIsland"
+            class="status-island glass-pill"
+            :title="llmStatus === 'connected' ? 'LLM 可用' : 'LLM 不可用'"
+          >
+              <div class="status-dot" :class="llmStatus"></div>
+              <span class="status-text">{{ llmStatus === 'connected' ? 'LLM 在线' : 'LLM 离线' }}</span>
+          </div>
+
+          <!-- Right Island: User Profile + Compact Menu -->
+          <div class="header-right-container" @click.stop>
+            <div class="header-right glass-pill" @click.stop="toggleUserMenu">
+                <el-avatar
+                  :size="28"
                   :style="{
-                    background: ['venue_admin', 'sys_admin'].includes(userRole) ? '#626aef' : '#409eff',
-                    marginRight: '8px', 
+                    background: ['venue_admin', 'floor_admin', 'sys_admin'].includes(userRole) ? '#626aef' : '#409eff',
+                    marginRight: '8px',
                     fontSize: '14px'
                   }"
                 >
-                    <el-icon v-if="['venue_admin', 'sys_admin'].includes(userRole)"><UserFilled /></el-icon>
+                    <el-icon v-if="['venue_admin', 'floor_admin', 'sys_admin'].includes(userRole)"><UserFilled /></el-icon>
                     <el-icon v-else><User /></el-icon>
                 </el-avatar>
-                <span class="username">{{ authStore.user?.username }}</span>
-                <el-icon class="el-icon--right" :class="{ 'is-rotated': showUserMenu }"><arrow-down /></el-icon>
+                <div class="user-meta-inline">
+                  <span class="username">{{ authStore.user?.username }}</span>
+                  <span class="user-role-inline">{{ userRoleLabel }}</span>
+                </div>
+                <el-icon class="el-icon--right" :class="{ 'is-rotated': showUserMenu }"><ArrowDown /></el-icon>
             </div>
 
-            <!-- User Menu Island (Logout Button) -->
             <transition name="island-pop">
-                <div v-if="showUserMenu" class="user-menu-island glass-pill">
-                    <div class="menu-item" @click="handleLogout">
-                        <el-icon><SwitchButton /></el-icon>
-                        <span>退出登录</span>
-                    </div>
+              <div v-if="showUserMenu" class="user-menu-island glass-pill">
+                <div
+                  class="menu-notice-pill"
+                  :class="{ 'is-active': showNotificationPanel }"
+                  @click.stop="toggleNotificationPanel"
+                >
+                  <el-badge :value="unreadNotificationCount" :hidden="unreadNotificationCount === 0" :max="99">
+                    <el-icon :size="13"><Bell /></el-icon>
+                  </el-badge>
                 </div>
+                <div class="menu-item logout-pill" @click.stop="handleLogout">
+                  <span>退出登录</span>
+                </div>
+              </div>
+            </transition>
+
+            <transition name="island-pop">
+              <div v-if="showNotificationPanel && showUserMenu" class="notification-panel glass-pill">
+                <div class="notification-header">
+                  <span>消息通知</span>
+                  <el-button v-if="notifications.length > 0" text size="small" @click="markAllAsRead">全部已读</el-button>
+                </div>
+                <div class="notification-list" v-if="notifications.length > 0">
+                  <div
+                    v-for="item in notifications"
+                    :key="item.id"
+                    class="notification-item"
+                    :class="{ 'is-unread': !item.is_read }"
+                    @click="markAsRead(item)"
+                  >
+                    <div class="notification-title">{{ item.title }}</div>
+                    <div class="notification-content">{{ item.content }}</div>
+                    <div class="notification-time">{{ formatTime(item.created_at) }}</div>
+                  </div>
+                </div>
+                <div v-else class="notification-empty">
+                  暂无通知
+                </div>
+              </div>
             </transition>
           </div>
         </el-header>
         
         <el-main class="main-content">
-          <router-view v-slot="{ Component }">
-             <transition name="fade" mode="out-in">
-               <component :is="Component" />
-             </transition>
-          </router-view>
+          <div class="content-shell">
+            <router-view v-slot="{ Component }">
+               <transition name="fade" mode="out-in">
+                 <component :is="Component" />
+               </transition>
+            </router-view>
+          </div>
         </el-main>
       </el-container>
     </el-container>
@@ -387,6 +415,8 @@ const handleLogout = () => {
 
 <style scoped>
 .layout-container {
+  --rail-collapsed-width: 72px;
+  --rail-offset-left: 126px;
   height: 100vh;
   background-color: transparent; /* Let body gradient show through */
 }
@@ -421,14 +451,14 @@ const handleLogout = () => {
   /* Premium Glass Material with Gradient */
   background: linear-gradient(
     180deg,
-    rgba(235, 235, 240, 0.45) 0%,
-    rgba(225, 225, 235, 0.4) 100%
+    rgba(238, 240, 245, 0.34) 0%,
+    rgba(228, 230, 238, 0.3) 100%
   ) !important;
-  backdrop-filter: blur(60px) saturate(170%);
-  -webkit-backdrop-filter: blur(60px) saturate(170%);
+  backdrop-filter: blur(32px) saturate(150%);
+  -webkit-backdrop-filter: blur(32px) saturate(150%);
   
   /* Refined Border */
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.46);
   
   /* Text Color */
   color: rgba(0, 0, 0, 0.85);
@@ -446,16 +476,16 @@ const handleLogout = () => {
   /* Auto Height based on content */
   height: auto;
   min-height: 100px;
-  width: 80px; /* Base width (Collapsed) */
-  border-radius: 40px;
+  width: 72px; /* Base width (Collapsed) */
+  border-radius: 36px;
   
   /* Layered Shadow for Premium Depth */
   box-shadow: 
-    0 12px 48px rgba(0, 0, 0, 0.1),
-    0 4px 16px rgba(0, 0, 0, 0.06),
+    0 12px 44px rgba(0, 0, 0, 0.08),
+    0 4px 16px rgba(0, 0, 0, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
   
-  padding: 16px 0;
+  padding: 14px 0;
   box-sizing: border-box;
   
   /* Smooth Expansion Spring Transition */
@@ -466,18 +496,18 @@ const handleLogout = () => {
 
 /* HOVER STATE: EXPAND with Enhanced Glass */
 .aside-menu:hover {
-    width: 240px; /* Expanded Width */
+    width: 220px; /* Expanded Width */
     background: linear-gradient(
       180deg,
-      rgba(245, 245, 250, 0.7) 0%,
-      rgba(235, 235, 245, 0.65) 100%
+      rgba(246, 247, 252, 0.56) 0%,
+      rgba(236, 238, 247, 0.5) 100%
     ) !important;
-    backdrop-filter: blur(70px) saturate(200%);
-    -webkit-backdrop-filter: blur(70px) saturate(200%);
-    border: 1px solid rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(36px) saturate(155%);
+    -webkit-backdrop-filter: blur(36px) saturate(155%);
+    border: 1px solid rgba(255, 255, 255, 0.58);
     box-shadow: 
-      0 16px 64px rgba(0, 0, 0, 0.14),
-      0 6px 20px rgba(0, 0, 0, 0.08),
+      0 16px 56px rgba(0, 0, 0, 0.12),
+      0 6px 20px rgba(0, 0, 0, 0.07),
       inset 0 1px 0 rgba(255, 255, 255, 0.7);
     align-items: flex-start; 
 }
@@ -485,11 +515,11 @@ const handleLogout = () => {
 html.dark .aside-menu {
   background: linear-gradient(
     180deg,
-    rgba(32, 32, 36, 0.5) 0%,
-    rgba(26, 26, 30, 0.45) 100%
+    rgba(30, 31, 35, 0.38) 0%,
+    rgba(24, 25, 30, 0.34) 100%
   ) !important;
   color: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: 
     0 12px 48px rgba(0, 0, 0, 0.35),
     0 4px 16px rgba(0, 0, 0, 0.2),
@@ -499,13 +529,13 @@ html.dark .aside-menu {
 html.dark .aside-menu:hover {
   background: linear-gradient(
     180deg,
-    rgba(42, 42, 48, 0.75) 0%,
-    rgba(36, 36, 42, 0.7) 100%
+    rgba(40, 41, 48, 0.58) 0%,
+    rgba(33, 34, 40, 0.52) 100%
   ) !important;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 
-    0 16px 64px rgba(0, 0, 0, 0.5),
-    0 6px 20px rgba(0, 0, 0, 0.3),
+    0 16px 56px rgba(0, 0, 0, 0.45),
+    0 6px 20px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
@@ -578,121 +608,194 @@ html.dark .status-text { color: #eee; }
 }
 
 /* Absolutely Positioned Islands */
-.header-left {
-    position: fixed; /* Fixed to viewport */
+.header-left-group {
+    position: fixed;
     top: 32px;
-    left: 140px; /* Right of the sidebar rail */
+    left: 126px;
     pointer-events: auto;
     z-index: 910;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: min(66vw, 620px);
 }
 
-
+.header-left {
+    position: relative;
+    min-height: 44px;
+    max-width: min(42vw, 360px);
+    overflow: hidden;
+    justify-content: center;
+}
 
 /* User Menu Island Container */
 .header-right-container {
     position: fixed;
     top: 32px;
-    right: 40px; /* ALIGNMENT: Right Anchor */
+    right: 40px;
     z-index: 910;
     display: flex;
     flex-direction: column;
-    align-items: flex-end; /* Align menu to right */
-    pointer-events: none; /* Container passes clicks */
+    align-items: flex-end;
+    pointer-events: none;
 }
 
-/* The actual clickable pill */
 .header-right {
-    position: relative; /* relative within the flex column */
-    top: auto;
-    right: auto;
+    position: relative;
+    min-height: 44px;
     cursor: pointer;
     pointer-events: auto;
     user-select: none;
     z-index: 912;
+    max-width: 210px;
+    justify-content: center;
+    padding-right: 14px !important;
 }
 
-/* The Popup Menu Island */
+.user-meta-inline {
+    min-width: 0;
+    margin-right: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+}
+
+.user-role-inline {
+    font-size: 10px;
+    font-weight: 600;
+    opacity: 0.72;
+    white-space: nowrap;
+}
+
 .user-menu-island {
     pointer-events: auto;
-    margin-top: 12px;
-    padding: 8px !important; /* Tighter padding for menu */
-    min-width: 140px;
-    flex-direction: column;
-    align-items: stretch;
+    margin-top: 0;
+    padding: 6px !important;
+    min-width: 122px;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
     cursor: pointer;
-    transform-origin: top right;
-    position: relative;
+    transform-origin: right center;
+    position: absolute;
+    right: calc(100% + 8px);
+    top: 0;
     z-index: 911;
+    background: rgba(255, 255, 255, 0.86) !important;
+    border: 1px solid rgba(255, 255, 255, 0.84) !important;
+    backdrop-filter: blur(20px) saturate(145%);
+    -webkit-backdrop-filter: blur(20px) saturate(145%);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
+}
+
+html.dark .user-menu-island {
+    background: rgba(19, 22, 30, 0.9) !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
+}
+
+.menu-notice-pill {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.64);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #1d1d1f;
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+html.dark .menu-notice-pill {
+    background: rgba(255, 255, 255, 0.2);
+    color: #f2f2f2;
+}
+
+.menu-notice-pill.is-active,
+.menu-notice-pill:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.84);
+}
+
+html.dark .menu-notice-pill.is-active,
+html.dark .menu-notice-pill:hover {
+    background: rgba(255, 255, 255, 0.34);
 }
 
 .menu-item {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    padding: 10px 16px;
-    border-radius: 40px; /* Inner pill */
-    transition: background 0.2s;
+    flex-direction: row;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    transition: background 0.2s, transform 0.2s;
     color: #1d1d1f;
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.58);
 }
 
 html.dark .menu-item {
     color: #fff;
+    background: rgba(255, 255, 255, 0.18);
 }
 
 .menu-item:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.78);
+    transform: translateY(-1px);
 }
 
 html.dark .menu-item:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.3);
 }
 
 .menu-item .el-icon {
-    margin-right: 8px;
-    font-size: 16px;
+    margin-right: 6px;
+    font-size: 14px;
+}
+
+.user-menu-island.island-pop-enter-from,
+.user-menu-island.island-pop-leave-to,
+.notification-panel.island-pop-enter-from,
+.notification-panel.island-pop-leave-to {
+    opacity: 0;
+    transform: translateX(10px) scale(0.96);
+    filter: blur(4px);
 }
 
 /* Rotation for arrow */
 .el-icon--right {
     transition: transform 0.3s;
 }
+
 .is-rotated {
     transform: rotate(180deg);
 }
 
 /* Notification Styles */
-.notification-container {
-    position: fixed;
-    top: 32px;
-    right: 240px;
-    z-index: 910;
-    pointer-events: auto;
-}
-
-.notification-bell {
-    cursor: pointer;
-    padding: 10px 16px !important;
-}
-
-.notification-bell .el-icon {
-    color: #1d1d1f;
-}
-
-html.dark .notification-bell .el-icon {
-    color: #fff;
-}
-
 .notification-panel {
     position: absolute;
-    top: 55px;
-    right: 0;
-    width: 320px;
+    top: 46px;
+    right: calc(100% + 8px);
+    width: 300px;
     max-height: 400px;
     padding: 0 !important;
     overflow: hidden;
     flex-direction: column;
     cursor: default;
+    background: rgba(255, 255, 255, 0.9) !important;
+    border: 1px solid rgba(255, 255, 255, 0.86) !important;
+    backdrop-filter: blur(22px) saturate(145%);
+    -webkit-backdrop-filter: blur(22px) saturate(145%);
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.16);
+}
+
+html.dark .notification-panel {
+    background: rgba(17, 20, 28, 0.92) !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 18px 38px rgba(0, 0, 0, 0.48);
 }
 
 .notification-header {
@@ -715,6 +818,7 @@ html.dark .notification-header {
 }
 
 .notification-item {
+    position: relative;
     padding: 12px 16px;
     border-bottom: 1px solid rgba(0, 0, 0, 0.03);
     cursor: pointer;
@@ -802,12 +906,17 @@ html.dark .notification-content {
 
 /* Glass Pills (The Islands) Style */
 .glass-pill {
-    /* High Transparency VisionOS Style - Matching Sidebar */
-    background: rgba(230, 230, 230, 0.4);
-    backdrop-filter: blur(50px) saturate(160%);
-    -webkit-backdrop-filter: blur(50px) saturate(160%);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+    background: linear-gradient(
+      150deg,
+      rgba(255, 255, 255, 0.74) 0%,
+      rgba(241, 243, 250, 0.62) 100%
+    );
+    backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(150%);
+    border: 1px solid var(--glass-surface-border);
+    box-shadow:
+      var(--glass-shadow),
+      inset 0 1px 0 rgba(255, 255, 255, 0.58);
     
     border-radius: 50px; /* Pill shape */
     padding: 10px 24px; /* More padding */
@@ -817,20 +926,24 @@ html.dark .notification-content {
 }
 
 .glass-pill:hover {
-    background: rgba(240, 240, 240, 0.65);
-    transform: translateY(-2px) scale(1.02);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+    background: var(--glass-surface-bg);
+    transform: translateY(-1px) scale(1.01);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.12);
 }
 
 html.dark .glass-pill {
-    background: rgba(30, 30, 32, 0.45);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(
+      150deg,
+      rgba(26, 30, 38, 0.84) 0%,
+      rgba(19, 22, 30, 0.78) 100%
+    );
+    border: 1px solid var(--glass-surface-border);
     color: #fff;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
 }
 
 html.dark .glass-pill:hover {
-    background: rgba(60, 60, 70, 0.65);
+    background: var(--glass-surface-bg);
 }
 
 .page-title {
@@ -838,6 +951,9 @@ html.dark .glass-pill:hover {
     font-size: 16px;
     color: #1d1d1f;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 html.dark .page-title {
@@ -845,37 +961,80 @@ html.dark .page-title {
 }
 
 .username {
-    font-weight: 500;
-    margin: 0 8px;
-    font-size: 14px;
+    font-weight: 650;
+    margin: 0;
+    font-size: 13px;
     color: inherit;
+    max-width: 120px;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-/* Dropdown link specific adjusted for pill */
-.el-dropdown-link {
-    padding: 0 !important;
-    border-radius: 0;
-    display: flex;
-    align-items: center;
-    color: inherit; /* Inherit from pill */
-}
-
-.el-dropdown-link:hover {
-    background: transparent !important;
+.logout-pill {
+    min-width: 88px;
+    justify-content: center;
+    white-space: nowrap;
+    letter-spacing: 0.2px;
 }
 
 .main-content {
   /* Offset content to align with floating header and fixed position */
-  padding: 100px 40px 40px 140px; /* Left: 140px (Title), Right: 40px (User) */
+  padding: 96px 28px 28px var(--rail-offset-left);
   overflow-y: auto;
+  overflow-x: hidden;
   height: 100vh;
 }
+
+.content-shell {
+    min-height: calc(100vh - 126px);
+    border-radius: 30px;
+    padding: 18px 10px 4px;
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(24px) saturate(145%);
+    -webkit-backdrop-filter: blur(24px) saturate(145%);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.1);
+    position: relative;
+    overflow: hidden;
+}
+
+html.dark .content-shell {
+    background: rgba(22, 22, 26, 0.5);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+
+.content-shell :deep(.app-title) {
+    display: none !important;
+}
+
+.content-shell :deep(.app-toolbar),
+.content-shell :deep(.header-actions) {
+    position: sticky;
+    top: -2px;
+    z-index: 15;
+    justify-content: flex-end;
+    animation: split-toolbar-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes split-toolbar-in {
+    0% {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
 :deep(.el-menu-item) {
-    margin: 8px 0;
+    margin: 7px 0;
     /* Stadium Shape: Circle when collapsed, Pill when expanded */
-    border-radius: 28px; 
-    height: 56px;
-    width: 56px; /* Default Collapsed Width */
+    border-radius: 26px; 
+    height: 52px;
+    width: 52px; /* Default Collapsed Width */
     
     padding: 0 !important;
     transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); /* Smooth spring */
@@ -897,8 +1056,8 @@ html.dark .page-title {
 
 /* Force centering when collapsed */
 :deep(.el-menu-item .el-icon) {
-    font-size: 24px; /* Refined size */
-    min-width: 56px;
+    font-size: 22px; /* Refined size */
+    min-width: 52px;
     text-align: center;
     margin: 0;
     transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -960,6 +1119,7 @@ html.dark .aside-menu:hover :deep(.el-menu-item:hover) {
     box-shadow: 
       0 4px 16px rgba(0, 0, 0, 0.12),
       0 2px 8px rgba(0, 0, 0, 0.08);
+    transform: translateX(1px);
 }
 
 html.dark :deep(.el-menu-item.is-active) {
@@ -980,329 +1140,342 @@ html.dark :deep(.el-menu-item.is-active) {
 }
 
 /* --- RESPONSIVE BREAKPOINTS (ALL DEVICES) --- */
+@media (max-width: 1360px) {
+    .header-left-group { left: 112px; top: 24px; }
+    .status-island { top: 24px; }
+    .header-right-container { top: 24px; right: 24px; }
+    .main-content { padding: 88px 20px 24px 104px; }
+    .content-shell { min-height: calc(100vh - 112px); padding: 16px 8px 2px; }
+}
 
-/* Tablet Portrait / Small Desktop */
-@media (max-width: 1024px) {
-    .header-left { left: 100px; }
+@media (max-width: 1180px) {
+    .header-left-group { max-width: 60vw; }
     .header-right-container { right: 24px; }
-    .notification-container { right: 200px; }
-    .main-content {
-        padding: 100px 24px 30px 100px;
+}
+
+@media (max-width: 980px) {
+    .header-left-group { left: 86px; max-width: calc(100vw - 196px); }
+    .header-right-container { right: 18px; }
+    .main-content { padding: 84px 14px 20px 86px; }
+}
+
+@media (max-width: 860px) {
+    .header-left-group { left: 80px; max-width: calc(100vw - 188px); }
+    .header-right-container { right: 14px; }
+    .header-right {
+        max-width: 148px;
     }
 }
 
-/* Mobile / Tablet Vertical - Enhanced Premium Design */
 @media (max-width: 768px) {
+    .layout-container {
+        height: 100dvh;
+    }
+
     .aside-menu {
-        bottom: 24px; /* Optimal placement for thumb reach */
+        bottom: 14px;
         top: auto;
         left: 50%;
-        transform: translateX(-50%) translateY(0);
+        transform: translateX(-50%);
         flex-direction: row;
-        
-        /* Premium Glass Material - Enhanced */
-        width: max-content !important;
-        height: 60px;
-        min-height: 0;
+        width: min(392px, calc(100% - 24px)) !important;
+        height: 58px;
+        min-height: 58px;
         border-radius: 30px;
-        padding: 4px 12px !important;
-        
-        padding: 10px 16px; /* More balanced padding */
-        
-        /* Layered Shadow for Depth */
-        box-shadow: 
-            0 8px 32px rgba(0, 0, 0, 0.1),
-            0 2px 8px rgba(0, 0, 0, 0.05),
-            inset 0 1px 0 rgba(255, 255, 255, 0.5); /* Inner highlight */
-        
-        /* Enhanced Glass Effect with Gradient */
+        padding: 7px !important;
+        box-shadow:
+            0 12px 34px rgba(0, 0, 0, 0.16),
+            inset 0 1px 0 rgba(255, 255, 255, 0.52);
         background: linear-gradient(
-            135deg,
-            rgba(240, 240, 245, 0.5) 0%,
-            rgba(230, 230, 240, 0.45) 100%
+            150deg,
+            rgba(245, 247, 252, 0.54) 0%,
+            rgba(235, 238, 247, 0.46) 100%
         ) !important;
-        backdrop-filter: blur(60px) saturate(180%);
-        -webkit-backdrop-filter: blur(60px) saturate(180%);
-        
-        border: 1px solid rgba(255, 255, 255, 0.6);
-        
-        align-items: center; 
-        justify-content: center;
-        overflow: visible; 
-        transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+        backdrop-filter: blur(36px) saturate(155%);
+        -webkit-backdrop-filter: blur(36px) saturate(155%);
+        transition: transform 0.38s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.34s cubic-bezier(0.22, 1, 0.36, 1), background 0.34s cubic-bezier(0.22, 1, 0.36, 1), height 0.34s cubic-bezier(0.22, 1, 0.36, 1), width 0.34s cubic-bezier(0.22, 1, 0.36, 1);
         z-index: 2200;
+        overflow: hidden;
     }
 
-    /* Dark Mode - Premium Glass */
+    .aside-menu.aside-menu--compact {
+        width: min(180px, calc(100% - 192px)) !important;
+    }
+
+    .aside-menu.aside-menu--compact:hover {
+        width: min(226px, calc(100% - 146px)) !important;
+    }
+
+    .aside-menu:active {
+        transform: translateX(calc(-50% - 2px)) translateY(-1px) scale(0.985);
+    }
+
+    .aside-menu:hover {
+        width: min(392px, calc(100% - 24px)) !important;
+        height: 70px;
+        align-items: center !important;
+        transform: translateX(calc(-50% + 3px)) translateY(-5px) scale(1.01);
+        background: linear-gradient(
+            150deg,
+            rgba(249, 250, 254, 0.66) 0%,
+            rgba(241, 243, 250, 0.58) 100%
+        ) !important;
+        box-shadow:
+            0 16px 42px rgba(0, 0, 0, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.52);
+    }
+
     html.dark .aside-menu {
         background: linear-gradient(
-            135deg,
-            rgba(35, 35, 40, 0.6) 0%,
-            rgba(25, 25, 30, 0.55) 100%
+            150deg,
+            rgba(35, 37, 43, 0.6) 0%,
+            rgba(29, 31, 36, 0.56) 100%
         ) !important;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        box-shadow: 
-            0 8px 32px rgba(0, 0, 0, 0.4),
-            0 2px 8px rgba(0, 0, 0, 0.2),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        box-shadow:
+            0 12px 34px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.12);
     }
 
-    /* HOVER/ACTIVE STATE: Elegant Expansion */
-    .aside-menu:hover,
-    .aside-menu:active {
-        transform: translateX(-50%) translateY(0); 
-        height: 76px;
-        padding: 6px 16px !important;
-        width: max-content !important; 
-        min-width: 0 !important; 
-        
-        /* Lighter on expansion - matching desktop logic */
+    html.dark .aside-menu:hover {
         background: linear-gradient(
-            135deg,
-            rgba(248, 248, 252, 0.7) 0%,
-            rgba(240, 240, 248, 0.65) 100%
+            150deg,
+            rgba(43, 45, 52, 0.72) 0%,
+            rgba(36, 38, 44, 0.66) 100%
         ) !important;
-        backdrop-filter: blur(70px) saturate(200%);
-        -webkit-backdrop-filter: blur(70px) saturate(200%);
-        
-        border-radius: 40px; 
-        border: 1px solid rgba(255, 255, 255, 0.7);
-        
-        /* Enhanced shadow on expansion */
-        box-shadow: 
-            0 12px 48px rgba(0, 0, 0, 0.15),
-            0 4px 12px rgba(0, 0, 0, 0.08),
-            inset 0 1px 0 rgba(255, 255, 255, 0.6);
-        
-        align-items: center !important; 
-        justify-content: center;
-        padding: 8px 24px; 
-        transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); /* Spring animation */
+        box-shadow:
+            0 16px 42px rgba(0, 0, 0, 0.54),
+            inset 0 1px 0 rgba(255, 255, 255, 0.12);
     }
-    
-    html.dark .aside-menu:hover,
-    html.dark .aside-menu:active {
-        background: linear-gradient(
-            135deg,
-            rgba(45, 45, 52, 0.75) 0%,
-            rgba(35, 35, 42, 0.7) 100%
-        ) !important;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 
-            0 12px 48px rgba(0, 0, 0, 0.5),
-            0 4px 12px rgba(0, 0, 0, 0.3),
-            inset 0 1px 0 rgba(255, 255, 255, 0.15);
-    }
-
 
     .el-menu-vertical {
         flex-direction: row;
-        justify-content: center;
-        width: max-content !important; 
-        background: transparent !important;
+        justify-content: space-between;
+        width: 100% !important;
         height: 100%;
-        align-items: center;
+        align-items: stretch;
         gap: 8px;
-        transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
         padding: 0;
     }
-    
-    /* Expand gap on hover for breathing room */
+
     .aside-menu:hover .el-menu-vertical {
-        gap: 12px;
-        align-items: center; 
-        height: 100%;
+        gap: 8px;
     }
-    
-    /* Menu Item - Vertical layout (icon top, label bottom) */
-    :deep(.el-menu-item) {
-        flex: none !important; 
-        width: 52px !important;
-        min-width: 52px !important;
-        height: 52px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        border-radius: 26px !important; /* Perfect circle */
-        background: transparent !important; 
-        padding: 0 !important;
-        margin: 0 !important;
-        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-        position: relative;
-        overflow: visible;
-        flex-shrink: 0;
-        cursor: pointer;
-    }
-    
-    /* Hover: Expand horizontally to show label on right */
+
+    :deep(.el-menu-item),
     .aside-menu:hover :deep(.el-menu-item) {
-        width: auto !important;
-        min-width: 52px !important;
-        height: 52px !important;
-        padding-right: 10px !important;
-        border-radius: 26px !important;
-        flex-direction: row !important;
-        gap: 6px;
-        align-items: center;
-    }
-    
-    /* Active State - Circle Background */
-    :deep(.el-menu-item.is-active) {
-        width: 52px !important;
-        height: 52px !important;
-        border-radius: 26px !important; /* Perfect circle */
-        background: rgba(255, 255, 255, 0.95) !important;
-        box-shadow: 
-            0 4px 16px rgba(0, 0, 0, 0.12),
-            0 2px 8px rgba(0, 0, 0, 0.08);
-        font-weight: 600;
-        color: #1d1d1f !important;
-    }
-    
-    html.dark :deep(.el-menu-item.is-active) {
-        background: rgba(255, 255, 255, 0.95) !important;
-        color: #000 !important;
-    }
-    
-    /* Hover State - Subtle Glass Highlight */
-    :deep(.el-menu-item:hover) {
-        background-color: rgba(255, 255, 255, 0.25) !important;
-        transform: scale(1.08); /* Gentle bounce */
-    }
-    
-    .aside-menu:hover :deep(.el-menu-item:hover) {
-        background-color: rgba(255, 255, 255, 0.35) !important;
-        transform: scale(1.1); /* More pronounced in expanded state */
-    }
-    
-    html.dark :deep(.el-menu-item:hover) {
-        background-color: rgba(255, 255, 255, 0.15) !important;
-    }
-    
-    html.dark .aside-menu:hover :deep(.el-menu-item:hover) {
-        background-color: rgba(255, 255, 255, 0.2) !important;
-    }
-
-
-    /* Icon - Centered in circle */
-    :deep(.el-menu-item .el-icon) {
-        position: absolute;
-        top: 50%;
-        left: 26px;
-        transform: translate(-50%, -50%);
-        font-size: 20px;
-        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-        z-index: 2;
-        color: #1d1d1f;
-    }
-    
-    /* Icon on hover: stays in position but relative */
-    .aside-menu:hover :deep(.el-menu-item .el-icon) {
-        position: relative;
-        top: auto;
-        left: auto;
-        transform: none;
-        flex-shrink: 0;
-    }
-
-
-
-    /* Label - Hidden by default */
-    :deep(.el-menu-item span) {
-        opacity: 0;
-        width: 0;
-        overflow: hidden;
-        white-space: nowrap;
-        font-size: 13px;
-        font-weight: 500;
-        color: #1d1d1f;
-        transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-        letter-spacing: 0.5px;
-        z-index: 1;
-        line-height: 1;
-    }
-    
-    /* Label appears on right */
-    .aside-menu:hover :deep(.el-menu-item span) {
-        opacity: 1;
-        width: auto;
-        font-weight: 600;
-    }
-    
-    /* Dark mode label color */
-    html.dark :deep(.el-menu-item span) { 
-        color: #fff; 
-    }
-    
-    /* Active state - ensure label is visible and styled correctly */
-    :deep(.el-menu-item.is-active .el-icon) {
-        color: #1d1d1f;
-    }
-    
-    html.dark :deep(.el-menu-item.is-active .el-icon) {
-        color: #000;
-    }
-    
-    /* Header Positioning - Mobile Optimized */
-    .header-left { 
-        left: 16px; 
-        top: 12px; 
-        font-size: 14px;
-    }
-    
-    .header-left .page-title {
-        font-size: 15px;
-        font-weight: 600;
-    }
-    
-    .header-right-container { 
-        right: 16px; 
-        top: 12px; 
-    }
-    
-    /* Hide notification bell on mobile to save space */
-    .notification-container { 
-        display: none !important;
-    }
-    
-    /* Simplify status island on mobile - just a dot */
-    .status-island { 
-        display: flex !important;
-        top: 20px !important;
-        padding: 0 !important;
+        flex: 1 1 0 !important;
         width: auto !important;
         min-width: 0 !important;
-        background: transparent !important;
-        backdrop-filter: none !important;
-        border: none !important;
-        box-shadow: none !important;
+        height: 100% !important;
+        margin: 0 !important;
+        border-radius: 20px !important;
+        padding: 0 8px !important;
+        display: flex;
+        flex-direction: column !important;
+        justify-content: center;
+        align-items: center;
+        gap: 2px;
+        transition: background 0.32s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.28s ease;
+    }
+
+    :deep(.el-menu-item .el-icon),
+    .aside-menu:hover :deep(.el-menu-item .el-icon) {
+        position: static;
+        transform: none;
+        min-width: auto;
+        font-size: 17px;
+        line-height: 1;
+    }
+
+    :deep(.el-menu-item span),
+    .aside-menu:hover :deep(.el-menu-item span) {
+        opacity: 0;
+        width: auto;
+        transform: none;
+        max-height: 0;
+        font-size: 10.5px;
+        font-weight: 600;
+        line-height: 1.1;
+        letter-spacing: 0.15px;
+        margin: 0;
+        transition: opacity 0.28s ease, max-height 0.28s ease, transform 0.28s ease;
+        overflow: hidden;
+    }
+
+    .aside-menu:hover :deep(.el-menu-item span) {
+        opacity: 1;
+        max-height: 20px;
+        transform: translateY(1px);
+        transition-delay: 0.05s;
+        white-space: nowrap;
+    }
+
+    :deep(.el-menu-item:hover),
+    .aside-menu:hover :deep(.el-menu-item:hover) {
+        transform: translateY(-1px) translateX(1px);
+        background-color: rgba(255, 255, 255, 0.18) !important;
+    }
+
+    :deep(.el-menu-item.is-active) {
+        background: rgba(255, 255, 255, 0.94) !important;
+        color: #111 !important;
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+        transform: translateY(-1px) translateX(1px);
+    }
+
+    html.dark :deep(.el-menu-item) {
+        color: #f0f0f0;
+    }
+
+    html.dark :deep(.el-menu-item:hover) {
+        background-color: rgba(255, 255, 255, 0.12) !important;
+    }
+
+    html.dark :deep(.el-menu-item.is-active) {
+        background: rgba(255, 255, 255, 0.9) !important;
+        color: #111 !important;
+    }
+
+    .header-left-group {
+        left: 10px;
+        top: 8px;
+        max-width: calc(100vw - 140px);
+        gap: 5px;
+    }
+
+    .header-left {
+        max-width: calc(100vw - 168px);
+        padding-inline: 12px !important;
+    }
+
+    .header-left .page-title {
+        font-size: 13px;
+    }
+
+    .header-right-container {
+        right: 12px;
+        top: 8px;
+        align-items: flex-end;
+    }
+
+    .header-right {
+        max-width: 124px;
+        padding: 6px 8px !important;
+    }
+
+    .header-right .username {
+        font-size: 11px;
+        max-width: 62px;
+    }
+
+    .header-right .user-role-inline {
+        display: block;
+        font-size: 9px;
+    }
+
+    .user-menu-island {
+        right: calc(100% + 6px);
+        top: 0;
+        min-width: 108px;
+        padding: 5px !important;
+        gap: 5px;
+    }
+
+    .menu-notice-pill {
+        width: 30px;
+        height: 30px;
+    }
+
+    .logout-pill {
+        min-width: 78px;
+        height: 30px;
+        font-size: 11px;
+    }
+
+    .notification-panel {
+        left: auto;
+        right: 0;
+        top: 42px;
+        width: min(300px, calc(100vw - 20px));
+    }
+
+    .status-island {
+        display: flex !important;
+        top: 17px !important;
+        padding: 4px 9px !important;
+        min-width: 0 !important;
+        background: rgba(255, 255, 255, 0.66) !important;
+        backdrop-filter: blur(16px) saturate(145%) !important;
+        -webkit-backdrop-filter: blur(16px) saturate(145%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.72) !important;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.11) !important;
         gap: 0 !important;
     }
-    
+
+    html.dark .status-island {
+        background: rgba(18, 21, 29, 0.86) !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38) !important;
+    }
+
     .status-island .status-text {
         display: none !important;
     }
-    
+
     .status-island .status-dot {
-        width: 10px !important;
-        height: 10px !important;
+        width: 9px !important;
+        height: 9px !important;
     }
-    
-    /* User menu - smaller on mobile */
-    .header-right .username {
-        font-size: 13px;
-    }
-    
-    .header-right :deep(.el-avatar) {
-        width: 24px;
-        height: 24px;
-        font-size: 12px;
-    }
-    
-    /* Main content padding - MORE BOTTOM SPACE for tab bar */
+
     .main-content {
-        padding: 70px 16px 160px 16px !important; /* Increased bottom to 160px */
+        padding: 62px 10px 108px 10px !important;
+    }
+
+    .content-shell {
+        min-height: calc(100dvh - 184px);
+        border-radius: 22px;
+        padding: 10px 4px 0;
+        background: rgba(255, 255, 255, 0.24);
+    }
+}
+
+@media (max-height: 520px) and (orientation: landscape) and (max-width: 980px) {
+    .aside-menu {
+        bottom: 8px;
+        width: min(346px, calc(100% - 24px)) !important;
+        height: 50px;
+        min-height: 50px;
+        padding: 5px !important;
+    }
+
+    .aside-menu:hover {
+        width: min(352px, calc(100% - 20px)) !important;
+        height: 56px;
+        transform: translateX(calc(-50% + 2px)) translateY(-3px);
+    }
+
+    .aside-menu.aside-menu--compact {
+        width: min(170px, calc(100% - 220px)) !important;
+    }
+
+    .aside-menu.aside-menu--compact:hover {
+        width: min(214px, calc(100% - 176px)) !important;
+    }
+
+    :deep(.el-menu-item .el-icon),
+    .aside-menu:hover :deep(.el-menu-item .el-icon) {
+        font-size: 15px;
+    }
+
+    :deep(.el-menu-item span),
+    .aside-menu:hover :deep(.el-menu-item span) {
+        font-size: 9px;
+    }
+
+    .aside-menu:hover :deep(.el-menu-item span) {
+        font-size: 10px;
+        white-space: nowrap;
     }
 }
 </style>

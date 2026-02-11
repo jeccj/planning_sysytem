@@ -2,8 +2,10 @@
 import { ref, onMounted } from 'vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 
 const myReservations = ref([])
+const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 
 const fetchMyReservations = async () => {
     try {
@@ -70,7 +72,7 @@ const handleCancel = async (reservation) => {
         ElMessage.success('预约已取消')
         fetchMyReservations()
     } catch (e) {
-        if (e !== 'cancel') {
+        if (!isUserDismiss(e)) {
             ElMessage.error('取消失败')
         }
     }
@@ -98,9 +100,9 @@ const formatDateTime = (value) => {
 </script>
 
 <template>
-  <div class="reservation-container">
-    <div class="page-header">
-        <h2>我的预约</h2>
+  <div class="reservation-container app-page app-stack">
+    <div class="page-header app-toolbar">
+        <h2 class="app-title">我的预约</h2>
         <el-button type="primary" @click="fetchMyReservations">刷新</el-button>
     </div>
 
@@ -140,7 +142,7 @@ const formatDateTime = (value) => {
                 <span v-else class="text-gray">--</span>
              </template>
           </el-table-column>
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column label="操作" width="150">
               <template #default="scope">
                   <el-button size="small" type="primary" plain @click="openDetail(scope.row)">详情</el-button>
                   <el-button 
@@ -206,7 +208,7 @@ const formatDateTime = (value) => {
     </div>
 
     <!-- 预约详情弹窗 -->
-    <el-dialog v-model="showDetailDialog" title="预约详情" width="500px" class="glass-dialog">
+    <el-dialog v-model="showDetailDialog" title="预约详情" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
         <div v-if="selectedReservation" class="detail-content">
             <div class="detail-item">
                 <span class="label">活动名称</span>
@@ -265,16 +267,8 @@ const formatDateTime = (value) => {
   </div>
 </template>
 
-<script>
-import { InfoFilled } from '@element-plus/icons-vue'
-export default {
-    components: { InfoFilled }
-}
-</script>
-
 <style scoped>
 .reservation-container {
-    padding: 0 40px;
     width: 100%;
 }
 
@@ -379,10 +373,6 @@ export default {
 
 /* Mobile responsive styles */
 @media (max-width: 768px) {
-    .reservation-container {
-        padding: 0 16px;
-    }
-    
     /* Hide page header on mobile to save space - title already in MainLayout */
     .page-header {
         display: none;

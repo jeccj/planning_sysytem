@@ -18,6 +18,6 @@ html, body {
     background: transparent !important; /* Let DarkBackground component show */
 }
 body {
-  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+  color: var(--text-primary);
 }
 </style>

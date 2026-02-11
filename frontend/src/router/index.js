@@ -10,6 +10,7 @@ const VenueManagement = () => import('../views/admin/VenueManagement.vue')
 const AdminAudit = () => import('../views/AdminAudit.vue') // Moving to admin folder later ideally
 const AnnouncementManagement = () => import('../views/admin/AnnouncementManagement.vue')
 const Announcements = () => import('../views/Announcements.vue')
+import SystemSettings from '../views/admin/SystemSettings.vue'
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -49,31 +50,37 @@ const router = createRouter({
                     path: 'announcements',
                     name: 'announcements',
                     component: Announcements,
-                    meta: { roles: ['student_teacher', 'venue_admin', 'sys_admin'] }
+                    meta: { roles: ['student_teacher', 'venue_admin', 'floor_admin', 'sys_admin'] }
                 },
                 // Admin Routes
                 {
                     path: 'admin/dashboard',
                     name: 'admin-dashboard',
                     component: AdminDashboard,
-                    meta: { roles: ['venue_admin', 'sys_admin'] }
+                    meta: { roles: ['venue_admin', 'floor_admin', 'sys_admin'] }
                 },
                 {
                     path: 'admin/venues',
                     name: 'admin-venues',
                     component: VenueManagement,
-                    meta: { roles: ['venue_admin', 'sys_admin'] }
+                    meta: { roles: ['venue_admin', 'floor_admin', 'sys_admin'] }
                 },
                 {
                     path: 'admin/audit',
                     name: 'admin-audit',
                     component: AdminAudit,
-                    meta: { roles: ['venue_admin', 'sys_admin'] }
+                    meta: { roles: ['venue_admin', 'floor_admin', 'sys_admin'] }
                 },
                 {
                     path: 'admin/users',
                     name: 'admin-users',
                     component: () => import('../views/admin/UserManagement.vue'),
+                    meta: { roles: ['sys_admin'] }
+                },
+                {
+                    path: 'admin/settings',
+                    name: 'admin-settings',
+                    component: SystemSettings,
                     meta: { roles: ['sys_admin'] }
                 },
                 {

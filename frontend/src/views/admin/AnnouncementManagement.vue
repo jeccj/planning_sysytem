@@ -1,12 +1,17 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const route = useRoute()
+const router = useRouter()
 const announcements = ref([])
+const keyword = ref('')
 const showModal = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
+const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 
 const form = ref({
   title: '',
@@ -31,7 +36,21 @@ const fetchAnnouncements = async () => {
 
 onMounted(() => fetchAnnouncements())
 
-const openCreate = () => {
+watch(
+  () => route.query.qa_ts,
+  () => {
+    if (route.query.qa === 'create-announcement') {
+      openCreate()
+      const nextQuery = { ...route.query }
+      delete nextQuery.qa
+      delete nextQuery.qa_ts
+      router.replace({ path: route.path, query: nextQuery })
+    }
+  },
+  { immediate: true }
+)
+
+function openCreate() {
   isEdit.value = false
   currentId.value = null
   form.value = { title: '', content: '', target_role: 'all' }
@@ -82,7 +101,7 @@ const handleDelete = async (row) => {
     ElMessage.success('公告已删除')
     fetchAnnouncements()
   } catch (e) {
-    if (e !== 'cancel') {
+    if (!isUserDismiss(e)) {
       ElMessage.error('删除失败')
     }
   }
@@ -92,16 +111,39 @@ const formatTime = (value) => {
   if (!value) return '-'
   return new Date(value).toLocaleString()
 }
+
+const filteredAnnouncements = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return announcements.value
+  return announcements.value.filter((item) => {
+    return (
+      String(item.id).includes(kw) ||
+      String(item.title || '').toLowerCase().includes(kw) ||
+      String(item.content || '').toLowerCase().includes(kw)
+    )
+  })
+})
 </script>
 
 <template>
-  <div>
-    <div class="header-actions">
-      <el-button type="primary" size="large" @click="openCreate">发布公告</el-button>
+  <div class="app-page app-stack">
+    <div class="admin-toolbar announcement-toolbar">
+      <div class="admin-toolbar__filters">
+        <el-input
+          v-model="keyword"
+          clearable
+          placeholder="搜索公告标题 / 内容 / ID"
+          class="toolbar-field toolbar-field--wide"
+        />
+      </div>
+      <div class="admin-toolbar__filters">
+        <span class="admin-toolbar__meta">共 {{ filteredAnnouncements.length }} / {{ announcements.length }} 条公告</span>
+        <el-button type="primary" @click="openCreate">发布公告</el-button>
+      </div>
     </div>
 
-    <el-card shadow="never" class="desktop-table">
-      <el-table :data="announcements" style="width: 100%" size="large">
+    <el-card shadow="never" class="desktop-table app-panel">
+      <el-table :data="filteredAnnouncements" style="width: 100%" size="large">
         <el-table-column prop="id" label="编号" width="80" />
         <el-table-column prop="title" label="标题" min-width="220" />
         <el-table-column prop="target_role" label="面向对象" width="160">
@@ -127,7 +169,7 @@ const formatTime = (value) => {
 
     <!-- Mobile Cards -->
     <div class="mobile-cards">
-      <el-card v-for="item in announcements" :key="item.id" class="announcement-card" shadow="hover">
+      <el-card v-for="item in filteredAnnouncements" :key="item.id" class="announcement-card" shadow="hover">
         <div class="card-header">
           <h3>{{ item.title }}</h3>
           <el-tag effect="plain" size="small">
@@ -151,8 +193,9 @@ const formatTime = (value) => {
         </div>
       </el-card>
     </div>
+    <el-empty v-if="filteredAnnouncements.length === 0" description="没有符合条件的公告" />
 
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑公告' : '发布公告'" width="700px" class="glass-dialog">
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑公告' : '发布公告'" width="700px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
       <el-form :model="form">
         <div class="form-pill">
           <el-form-item label="公告标题">
@@ -183,10 +226,12 @@ const formatTime = (value) => {
 </template>
 
 <style scoped>
-.header-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 20px;
+.announcement-toolbar {
+  --toolbar-field-width: 190px;
+}
+
+.toolbar-field--wide {
+  --toolbar-field-width: 250px;
 }
 
 :deep(.danger-outline) {
@@ -273,7 +318,7 @@ const formatTime = (value) => {
     border-top: 1px solid #ebeef5;
   }
   
-  .card-actions el-button {
+  .card-actions .el-button {
     flex: 1;
     font-size: 12px;
   }

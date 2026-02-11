@@ -5,7 +5,7 @@ import { useAuthStore } from '../../stores/auth'
 import SmartSearch from '../../components/SmartSearch.vue'
 import api from '../../api/axios'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, Minus, Plus, Filter, View, Location, Clock } from '@element-plus/icons-vue'
+import { ArrowRight, Filter, View, Location, Clock, DataAnalysis } from '@element-plus/icons-vue'
 import VenueCard from '../../components/VenueCard.vue'
 
 const authStore = useAuthStore()
@@ -14,10 +14,117 @@ const activeTab = ref('browse')
 const venues = ref([])
 const allVenues = ref([])
 const latestAnnouncement = ref(null)
+const buildingLoading = ref(false)
+const selectedBuildingForBoard = ref('')
+const buildingFallbackNotified = ref(false)
+const classroomTypeSet = new Set(['Classroom', '教室'])
+const buildingAvailability = ref({
+    selected_building: null,
+    summary: {
+        total_buildings: 0,
+        total_classrooms: 0,
+        available_classrooms: 0,
+        occupied_classrooms: 0,
+        maintenance_classrooms: 0
+    },
+    buildings: [],
+    classrooms: []
+})
+
+const createEmptyBuildingAvailability = () => ({
+    selected_building: null,
+    summary: {
+        total_buildings: 0,
+        total_classrooms: 0,
+        available_classrooms: 0,
+        occupied_classrooms: 0,
+        maintenance_classrooms: 0
+    },
+    buildings: [],
+    classrooms: []
+})
+
+const getVenueBuildingName = (venue) => {
+    const explicit = (venue?.building_name || venue?.buildingName || '').toString().trim()
+    if (explicit) return explicit
+    const location = (venue?.location || '').toString().trim()
+    if (!location) return '未分配楼栋'
+    return location.split(/\s+/)[0] || '未分配楼栋'
+}
+
+const buildBuildingAvailabilityFromVenues = (venues, buildingName = selectedBuildingForBoard.value) => {
+    const classrooms = (Array.isArray(venues) ? venues : []).filter((item) => classroomTypeSet.has(item?.type))
+    if (classrooms.length === 0) {
+        return createEmptyBuildingAvailability()
+    }
+
+    const grouped = new Map()
+    classrooms.forEach((venue) => {
+        const buildingNameOfVenue = getVenueBuildingName(venue)
+        const status = venue?.status === 'maintenance' ? 'maintenance' : 'available'
+        const row = {
+            id: Number(venue?.id),
+            name: venue?.name || '',
+            room_name: venue?.room_code || venue?.room_name || venue?.name || '未命名教室',
+            location: venue?.location || '',
+            capacity: Number(venue?.capacity || 0),
+            status,
+        }
+        const bucket = grouped.get(buildingNameOfVenue) || []
+        bucket.push(row)
+        grouped.set(buildingNameOfVenue, bucket)
+    })
+
+    const buildings = Array.from(grouped.entries())
+        .map(([name, rooms]) => {
+            const available = rooms.filter((room) => room.status === 'available').length
+            const maintenance = rooms.filter((room) => room.status === 'maintenance').length
+            return {
+                name,
+                total_classrooms: rooms.length,
+                available_classrooms: available,
+                occupied_classrooms: 0,
+                maintenance_classrooms: maintenance,
+            }
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+
+    if (buildings.length === 0) {
+        return createEmptyBuildingAvailability()
+    }
+
+    const validSelected = buildingName && grouped.has(buildingName) ? buildingName : buildings[0].name
+    const classroomsOfSelected = (grouped.get(validSelected) || [])
+        .slice()
+        .sort((a, b) => (a.room_name || '').localeCompare(b.room_name || '', 'zh-CN'))
+
+    const summary = buildings.reduce((acc, item) => {
+        acc.total_buildings += 1
+        acc.total_classrooms += item.total_classrooms
+        acc.available_classrooms += item.available_classrooms
+        acc.occupied_classrooms += item.occupied_classrooms
+        acc.maintenance_classrooms += item.maintenance_classrooms
+        return acc
+    }, {
+        total_buildings: 0,
+        total_classrooms: 0,
+        available_classrooms: 0,
+        occupied_classrooms: 0,
+        maintenance_classrooms: 0
+    })
+
+    return {
+        selected_building: validSelected,
+        summary,
+        buildings,
+        classrooms: classroomsOfSelected,
+    }
+}
 
 // 筛选条件
 const filterForm = ref({
     type: '',
+    building: '',
     minCapacity: null,
     facilities: [],
     status: '',
@@ -28,6 +135,8 @@ const showFilterPanel = ref(false)
 // 场地详情弹窗
 const showVenueDetail = ref(false)
 const selectedVenueDetail = ref(null)
+const showBuildingVenueDialog = ref(false)
+const selectedBrowseBuilding = ref('')
 
 const facilityOptions = ['投影仪', '音响设备', '白板', '电脑', '舞台']
 const venueTypeOptions = [
@@ -37,6 +146,16 @@ const venueTypeOptions = [
     { label: '实验室', value: 'Lab' }
 ]
 
+const buildingOptions = computed(() => {
+    const set = new Set()
+    allVenues.value.forEach((venue) => {
+        if (venue.building_name) {
+            set.add(venue.building_name)
+        }
+    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-CN'))
+})
+
 // 计算筛选后的场地列表
 const filteredVenues = computed(() => {
     let result = [...allVenues.value]
@@ -44,6 +163,11 @@ const filteredVenues = computed(() => {
     // 按类型筛选
     if (filterForm.value.type) {
         result = result.filter(v => v.type === filterForm.value.type)
+    }
+
+    // 按楼栋筛选
+    if (filterForm.value.building) {
+        result = result.filter(v => v.building_name === filterForm.value.building)
     }
     
     // 按容量筛选
@@ -73,9 +197,36 @@ const filteredVenues = computed(() => {
     return result
 })
 
+const browseBuildingGroups = computed(() => {
+    const map = new Map()
+    filteredVenues.value.forEach((venue) => {
+        const buildingName = getVenueBuildingName(venue)
+        const bucket = map.get(buildingName) || []
+        bucket.push(venue)
+        map.set(buildingName, bucket)
+    })
+
+    return Array.from(map.entries())
+        .map(([name, rooms]) => ({
+            name,
+            total: rooms.length,
+            available: rooms.filter((room) => room.status === 'available').length,
+            maintenance: rooms.filter((room) => room.status === 'maintenance').length,
+            rooms: rooms.slice().sort((a, b) => String(a.room_code || a.name).localeCompare(String(b.room_code || b.name), 'zh-CN')),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+})
+
+const browseBuildingRooms = computed(() => {
+    if (!selectedBrowseBuilding.value) return []
+    const target = browseBuildingGroups.value.find((item) => item.name === selectedBrowseBuilding.value)
+    return target?.rooms || []
+})
+
 const resetFilters = () => {
     filterForm.value = {
         type: '',
+        building: '',
         minCapacity: null,
         facilities: [],
         status: '',
@@ -88,10 +239,20 @@ const openVenueDetail = (venue) => {
     showVenueDetail.value = true
 }
 
+const openBrowseBuilding = (buildingName) => {
+    selectedBrowseBuilding.value = buildingName
+    showBuildingVenueDialog.value = true
+}
+
 const fetchAllVenues = async () => {
     try {
         const res = await api.get('/venues/')
         allVenues.value = res.data
+        if (buildingAvailability.value.summary.total_buildings === 0) {
+            const fallback = buildBuildingAvailabilityFromVenues(allVenues.value, selectedBuildingForBoard.value)
+            buildingAvailability.value = fallback
+            selectedBuildingForBoard.value = fallback.selected_building || ''
+        }
     } catch (e) { ElMessage.error("获取列表失败") }
 }
 
@@ -99,9 +260,37 @@ const handleTabClick = (tab) => {
     if (tab.paneName === 'browse') fetchAllVenues()
 }
 
+const fetchBuildingAvailability = async (buildingName = selectedBuildingForBoard.value) => {
+    buildingLoading.value = true
+    try {
+        const params = buildingName ? { building: buildingName } : {}
+        const res = await api.get('/venues/building-availability', { params })
+        buildingAvailability.value = res.data
+        selectedBuildingForBoard.value = res.data.selected_building || ''
+    } catch (e) {
+        try {
+            const sourceVenues = allVenues.value.length > 0 ? allVenues.value : (await api.get('/venues/')).data || []
+            const fallback = buildBuildingAvailabilityFromVenues(sourceVenues, buildingName)
+            buildingAvailability.value = fallback
+            selectedBuildingForBoard.value = fallback.selected_building || ''
+            if (!buildingFallbackNotified.value && e?.response?.status !== 404) {
+                const code = e?.response?.status
+                ElMessage.warning(code ? `楼栋空闲接口异常(${code})，已切换本地数据` : '楼栋空闲接口异常，已切换本地数据')
+                buildingFallbackNotified.value = true
+            }
+        } catch (fallbackError) {
+            console.error('student building availability fallback failed', fallbackError)
+            ElMessage.error('加载楼栋空闲数据失败')
+        }
+    } finally {
+        buildingLoading.value = false
+    }
+}
+
 onMounted(() => {
     fetchAllVenues()
     fetchLatestAnnouncement()
+    fetchBuildingAvailability()
 })
 
 // Natural Language Booking Logic
@@ -143,16 +332,14 @@ const handleSearchResults = async (results, query) => {
             
             if (hasData) {
                  intent = nlpRes.data
-                 console.log("NLP: Using DeepSeek Backend result", intent)
             }
         } catch (e) {
-            console.warn("NLP Backend unavailable, falling back to local regex", e)
+            console.error("NLP Backend unavailable, falling back to local regex", e)
         }
     }
 
     // 2. Fallback to Local Regex if Intent is Empty
     if (query && !intent.start_time && !intent.attendees_count) {
-       console.log("NLP: Using Local Regex Fallback")
         // Pre-process Chinese Numerals
         let q = query.toLowerCase()
         q = q.replace(/([一二两三四五六七八九十]+)(点|pm|am)/g, (match, p1, p2) => cnNums[p1] ? cnNums[p1] + p2 : match)
@@ -304,6 +491,15 @@ const reservationForm = ref({
 })
 const showProposalModal = ref(false)
 
+// File Upload Logic
+const fileList = ref([])
+const selectedFile = ref(null)
+
+const handleFileChange = (file) => {
+    selectedFile.value = file.raw
+    fileList.value = [file]
+}
+
 const timeStringToMinutes = (timeStr) => {
         if (!timeStr) return null
         const match = timeStr.match(/^(\d{2}):(\d{2})$/)
@@ -323,7 +519,9 @@ const toLocalDateString = (date) => {
 
 const buildDateTimeString = (dateStr, timeStr) => {
     if (!dateStr || !timeStr) return null
-    return `${dateStr}T${timeStr}:00`
+    const local = new Date(`${dateStr}T${timeStr}:00`)
+    if (Number.isNaN(local.getTime())) return null
+    return local.toISOString()
 }
 
 const isValidDateTimeString = (value) => {
@@ -358,12 +556,19 @@ const openBooking = (venue) => {
                 reservationForm.value.end_time_input = defaultEnd.toTimeString().slice(0, 5)
             }
         }
+
+        // Expanded Auto-fill
+        if (parsedIntent.value.activity_name) reservationForm.value.activity_name = parsedIntent.value.activity_name
+        if (parsedIntent.value.organizer_unit) reservationForm.value.organizer_unit = parsedIntent.value.organizer_unit
+        if (parsedIntent.value.contact_name) reservationForm.value.contact_name = parsedIntent.value.contact_name
+        if (parsedIntent.value.contact_phone) reservationForm.value.contact_phone = parsedIntent.value.contact_phone
         
         // Notification: FILL Complete
         const filledFields = []
         if (parsedIntent.value.activity_name) filledFields.push('活动名称')
         if (parsedIntent.value.start_time) filledFields.push('时间')
         if (parsedIntent.value.contact_name) filledFields.push('联系人')
+        if (parsedIntent.value.organizer_unit) filledFields.push('主办单位')
         
         if (filledFields.length > 0) {
             ElMessage.success(`AI自动填入: ${filledFields.join(', ')} 等信息`)
@@ -404,22 +609,41 @@ const submitBooking = async () => {
     const startDateTime = buildDateTimeString(reservationForm.value.date, reservationForm.value.start_time_input)
     const endDateTime = buildDateTimeString(reservationForm.value.date, reservationForm.value.end_time_input)
     if (!isValidDateTimeString(startDateTime) || !isValidDateTimeString(endDateTime)) {
+        console.error("Invalid DateTime:", startDateTime, endDateTime)
         ElMessage.error('时间无效，请重新填写')
         return
     }
     try {
-        await api.post('/reservations/', {
-            venue_id: selectedVenue.value.id,
-            organizer: authStore.user.username,
-            ...reservationForm.value,
-            start_time: startDateTime,
-            end_time: endDateTime
+        const formData = new FormData();
+        formData.append('venue_id', selectedVenue.value.id);
+        formData.append('organizer', authStore.user.username);
+        formData.append('activity_name', reservationForm.value.activity_name);
+        formData.append('organizer_unit', reservationForm.value.organizer_unit);
+        formData.append('contact_name', reservationForm.value.contact_name);
+        formData.append('contact_phone', reservationForm.value.contact_phone);
+        formData.append('proposal_content', reservationForm.value.proposal_content);
+        formData.append('attendees_count', reservationForm.value.attendees_count);
+        formData.append('start_time', startDateTime);
+        formData.append('end_time', endDateTime);
+        
+        if (selectedFile.value) {
+            formData.append('file', selectedFile.value);
+        }
+
+        await api.post('/reservations/', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data'
+            }
         })
         ElMessage.success("申请提交成功")
         showModal.value = false
         parsedIntent.value = {} // Clear intent after success
+        // Clear file
+        selectedFile.value = null
+        fileList.value = []
     } catch (e) {
         ElMessage.error("失败，请检查冲突")
+        console.error(e)
     }
 }
 
@@ -451,7 +675,7 @@ const goToAnnouncements = () => {
 </script>
 
 <template>
-  <div class="dashboard-container">
+  <div class="dashboard-container app-page app-stack">
     <el-card class="glass-panel notice-panel" shadow="never" @click="goToAnnouncements">
         <template #header>
             <div class="panel-header">
@@ -465,6 +689,52 @@ const goToAnnouncements = () => {
             <div class="notice-preview">{{ getNoticePreview(latestAnnouncement.content) }}</div>
         </div>
         <el-empty v-else description="暂无公告" :image-size="60" />
+    </el-card>
+    <el-card class="glass-panel building-panel" shadow="never">
+        <template #header>
+            <div class="panel-header panel-header--stack">
+                <span><el-icon><DataAnalysis /></el-icon> 楼栋教室空闲看板</span>
+                <el-select
+                    v-model="selectedBuildingForBoard"
+                    class="building-select"
+                    placeholder="选择楼栋"
+                    @change="fetchBuildingAvailability"
+                >
+                    <el-option
+                        v-for="item in buildingAvailability.buildings"
+                        :key="item.name"
+                        :label="`${item.name} (${item.available_classrooms}/${item.total_classrooms})`"
+                        :value="item.name"
+                    />
+                </el-select>
+            </div>
+        </template>
+
+        <div class="building-overview">
+            <span>总楼栋 {{ buildingAvailability.summary.total_buildings }}</span>
+            <span>教室 {{ buildingAvailability.summary.total_classrooms }}</span>
+            <span class="ok">空闲 {{ buildingAvailability.summary.available_classrooms }}</span>
+            <span class="warn">占用 {{ buildingAvailability.summary.occupied_classrooms }}</span>
+            <span class="mute">维护 {{ buildingAvailability.summary.maintenance_classrooms }}</span>
+        </div>
+
+        <div v-loading="buildingLoading" class="classroom-list">
+            <div v-for="room in buildingAvailability.classrooms" :key="room.id" class="classroom-item">
+                <div class="classroom-main">
+                    <span class="room-name">{{ room.room_name || room.name }}</span>
+                    <span class="room-capacity">{{ room.capacity }}人</span>
+                </div>
+                <div class="classroom-side">
+                    <el-tag
+                        size="small"
+                        :type="room.status === 'available' ? 'success' : room.status === 'occupied' ? 'warning' : 'info'"
+                    >
+                        {{ room.status === 'available' ? '空闲' : room.status === 'occupied' ? '占用' : '维护' }}
+                    </el-tag>
+                </div>
+            </div>
+            <el-empty v-if="!buildingLoading && buildingAvailability.classrooms.length === 0" description="当前楼栋暂无教室数据" :image-size="46" />
+        </div>
     </el-card>
     <!-- RESTORED: Functional Tabbed System -->
     <el-tabs v-model="activeTab" class="glass-tabs" @tab-click="handleTabClick">
@@ -512,6 +782,11 @@ const goToAnnouncements = () => {
                                  clearable
                              />
                          </el-form-item>
+                         <el-form-item label="楼栋">
+                             <el-select v-model="filterForm.building" placeholder="全部楼栋" clearable style="width: 140px;">
+                                 <el-option v-for="item in buildingOptions" :key="item" :label="item" :value="item" />
+                             </el-select>
+                         </el-form-item>
                          <el-form-item label="状态">
                              <el-select v-model="filterForm.status" placeholder="全部" clearable style="width: 100px;">
                                  <el-option label="可用" value="available" />
@@ -530,21 +805,51 @@ const goToAnnouncements = () => {
                  </div>
              </el-collapse-transition>
              
-             <div class="results-grid">
-                <VenueCard 
-                    v-for="venue in filteredVenues" 
-                    :key="venue.id" 
-                    :venue="venue" 
-                    @book="openBooking"
-                    @view-detail="openVenueDetail"
-                />
-            </div>
-            <el-empty v-if="filteredVenues.length === 0" description="没有符合条件的场馆" />
+             <div class="building-browse-grid">
+                <el-card v-for="building in browseBuildingGroups" :key="building.name" class="building-browse-card glass-panel" shadow="never">
+                    <div class="building-browse-card__head">
+                        <div>
+                            <div class="building-browse-card__name">{{ building.name }}</div>
+                            <div class="building-browse-card__meta">共 {{ building.total }} 间场馆</div>
+                        </div>
+                        <el-button size="small" type="primary" plain @click="openBrowseBuilding(building.name)">进入楼栋</el-button>
+                    </div>
+                    <div class="building-browse-card__stats">
+                        <span class="meta-pill ok">可预约 {{ building.available }}</span>
+                        <span class="meta-pill warn">维护 {{ building.maintenance }}</span>
+                        <span class="meta-pill">总数 {{ building.total }}</span>
+                    </div>
+                </el-card>
+             </div>
+            <el-empty v-if="browseBuildingGroups.length === 0" description="没有符合条件的楼栋" />
         </el-tab-pane>
     </el-tabs>
 
+    <el-dialog
+        v-model="showBuildingVenueDialog"
+        :title="`${selectedBrowseBuilding} · 场馆列表`"
+        width="760px"
+        :teleported="false"
+        :modal-append-to-body="false"
+        class="glass-dialog"
+    >
+        <div class="results-grid">
+            <VenueCard
+                v-for="venue in browseBuildingRooms"
+                :key="venue.id"
+                :venue="venue"
+                @book="openBooking"
+                @view-detail="openVenueDetail"
+            />
+        </div>
+        <el-empty v-if="browseBuildingRooms.length === 0" description="该楼栋暂无可展示场馆" />
+        <template #footer>
+            <el-button @click="showBuildingVenueDialog = false">关闭</el-button>
+        </template>
+    </el-dialog>
+
     <!-- BOOKING DIALOG: PILL STACK SYSTEM -->
-    <el-dialog v-model="showModal" title="预约场馆申请" width="600px" class="glass-dialog">
+    <el-dialog v-model="showModal" title="预约场馆申请" width="600px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
         <el-form :model="reservationForm">
             <div class="form-pill">
                 <el-form-item label="活动名称">
@@ -578,11 +883,13 @@ const goToAnnouncements = () => {
             </div>
             <div class="form-pill">
                 <el-form-item label="预计人数">
-                    <div class="custom-stepper">
-                        <el-button text bg circle :icon="Minus" @click="reservationForm.attendees_count > 1 && reservationForm.attendees_count--" />
-                        <el-input v-model="reservationForm.attendees_count" class="stepper-input" />
-                        <el-button text bg circle :icon="Plus" @click="reservationForm.attendees_count++" />
-                    </div>
+                    <el-input-number
+                        v-model="reservationForm.attendees_count"
+                        :min="1"
+                        :max="10000"
+                        controls-position="right"
+                        class="attendees-input"
+                    />
                 </el-form-item>
             </div>
             <div class="form-pill">
@@ -618,6 +925,21 @@ const goToAnnouncements = () => {
                     </div>
                 </el-form-item>
             </div>
+            
+            <div class="form-pill">
+                <el-form-item label="活动策划书">
+                    <el-upload
+                        class="upload-demo"
+                        action="#"
+                        :auto-upload="false"
+                        :limit="1"
+                        :on-change="handleFileChange"
+                        :file-list="fileList"
+                    >
+                        <el-button type="primary" link>点击上传附件 (Word/PDF)</el-button>
+                    </el-upload>
+                </el-form-item>
+            </div>
         </el-form>
         <template #footer>
             <el-button @click="showModal = false">取消</el-button>
@@ -625,7 +947,7 @@ const goToAnnouncements = () => {
         </template>
     </el-dialog>
 
-    <el-dialog v-model="showProposalModal" title="补充提案详情" width="500px" append-to-body class="glass-dialog spatial-modal" align-center>
+    <el-dialog v-model="showProposalModal" title="补充提案详情" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog spatial-modal" align-center>
         <div class="form-pill pill-stack">
             <el-form-item label="详细说明" label-position="top">
                 <el-input v-model="reservationForm.proposal_content" type="textarea" :rows="8" placeholder="描述流程、物资需求等..." />
@@ -638,7 +960,7 @@ const goToAnnouncements = () => {
     </el-dialog>
 
     <!-- 场地详情弹窗 -->
-    <el-dialog v-model="showVenueDetail" title="场地详情" width="600px" class="glass-dialog venue-detail-dialog">
+    <el-dialog v-model="showVenueDetail" title="场地详情" width="600px" :teleported="false" :modal-append-to-body="false" class="glass-dialog venue-detail-dialog">
         <div v-if="selectedVenueDetail" class="venue-detail-content">
             <!-- 场地图片 -->
             <div v-if="selectedVenueDetail.image_url" class="venue-image">
@@ -710,7 +1032,6 @@ const goToAnnouncements = () => {
 
 <style scoped>
 .dashboard-container {
-    padding: 0 40px; /* Healthy h-padding but no max-width */
     width: 100%;
 }
 
@@ -754,6 +1075,150 @@ const goToAnnouncements = () => {
     opacity: 0.75;
     line-height: 1.5;
 }
+
+.glass-panel {
+    border-radius: 30px !important;
+    background: rgba(255, 255, 255, 0.4) !important;
+    backdrop-filter: blur(50px) saturate(160%);
+    -webkit-backdrop-filter: blur(50px) saturate(160%);
+    border: none !important;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05);
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+    font-size: 16px;
+    color: #1d1d1f;
+}
+
+.panel-header .el-icon {
+    margin-right: 8px;
+}
+
+.panel-header--stack {
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.building-panel {
+    margin-bottom: 20px;
+}
+
+.building-select {
+    width: 240px;
+}
+
+.building-overview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 12px;
+    color: #1d1d1f;
+    opacity: 0.86;
+    margin-bottom: 10px;
+}
+
+.building-overview .ok { color: #2f9d57; }
+.building-overview .warn { color: #c9862f; }
+.building-overview .mute { color: #7b818f; }
+
+.classroom-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 140px;
+}
+
+.classroom-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.classroom-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.room-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1d1d1f;
+    max-width: 200px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.room-capacity {
+    font-size: 12px;
+    opacity: 0.72;
+    color: #1d1d1f;
+}
+
+.building-browse-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.building-browse-card {
+    border-radius: 20px !important;
+}
+
+.building-browse-card :deep(.el-card__body) {
+    padding: 14px !important;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.building-browse-card__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.building-browse-card__name {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.building-browse-card__meta {
+    font-size: 12px;
+    opacity: 0.72;
+    margin-top: 2px;
+}
+
+.building-browse-card__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.meta-pill {
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    line-height: 1.2;
+    background: rgba(255, 255, 255, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.meta-pill.ok { color: #2f9d57; }
+.meta-pill.warn { color: #c9862f; }
+
 .results-grid {
     display: flex;
     flex-direction: column;
@@ -772,10 +1237,7 @@ const goToAnnouncements = () => {
     margin-bottom: 20px !important;
 }
 
-.custom-stepper {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+.attendees-input {
     width: 100%;
 }
 .datetime-range {
@@ -817,18 +1279,8 @@ const goToAnnouncements = () => {
     margin: 0 4px;
     font-size: 12px;
 }
-.stepper-input {
-    width: 60px;
-    --el-input-text-color: #333;
-}
-:deep(.stepper-input .el-input__wrapper) {
-    box-shadow: none !important;
-    background: transparent !important;
-    padding: 0;
-}
-:deep(.stepper-input .el-input__inner) {
-    text-align: center;
-    font-weight: 600;
+:deep(.attendees-input .el-input__wrapper) {
+    border-radius: 18px !important;
 }
 
 .row-stack {
@@ -836,16 +1288,42 @@ const goToAnnouncements = () => {
     gap: 12px;
 }
 
+@media (max-width: 1200px) {
+    .results-grid {
+        margin-top: 26px;
+        gap: 14px;
+    }
+
+    .filter-form {
+        gap: 8px 10px;
+    }
+
+    .filter-input--keyword {
+        width: 170px;
+    }
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
-    .dashboard-container {
-        padding: 0 16px;
-    }
     .notice-panel {
         margin-bottom: 16px;
     }
+    .building-panel {
+        margin-bottom: 14px;
+    }
+    .building-browse-grid {
+        grid-template-columns: 1fr;
+        margin-top: 12px;
+        gap: 10px;
+    }
     .results-grid {
         margin-top: 20px;
+    }
+    .building-select {
+        width: 100%;
+    }
+    .room-name {
+        max-width: 116px;
     }
     .row-stack {
         flex-direction: column;
@@ -863,6 +1341,21 @@ const goToAnnouncements = () => {
 
     .filter-input {
         width: 100%;
+    }
+
+    .filter-bar {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .filter-result-count {
+        font-size: 13px;
+    }
+
+    .venue-info-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
     }
 }
 
@@ -986,5 +1479,28 @@ const goToAnnouncements = () => {
 .text-gray {
     color: #999;
     font-size: 13px;
+}
+
+:global(html.dark) .glass-panel {
+    background: rgba(30, 30, 32, 0.45) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+:global(html.dark) .panel-header,
+:global(html.dark) .building-overview,
+:global(html.dark) .room-name,
+:global(html.dark) .room-capacity,
+:global(html.dark) .notice-title,
+:global(html.dark) .notice-preview {
+    color: #eee;
+}
+
+:global(html.dark) .classroom-item {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+:global(html.dark) .meta-pill {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.16);
 }
 </style>

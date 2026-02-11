@@ -1,0 +1,68 @@
+import { Controller, Post, Body, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { TokenResponseDto } from './dto/token-response.dto';
+import { UserResponseDto } from '../users/dto/user-response.dto';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { User } from '../users/entities/user.entity';
+
+@Controller('auth')
+export class AuthController {
+    constructor(private authService: AuthService) { }
+
+    @Post('login')
+    async login(@Body() loginDto: LoginDto): Promise<TokenResponseDto> {
+        const user = await this.authService.validateUser(loginDto.username, loginDto.password);
+
+        if (!user) {
+            throw new HttpException(
+                'Incorrect username or password',
+                HttpStatus.UNAUTHORIZED,
+            );
+        }
+
+        return this.authService.login(user);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post('change-password')
+    async changePassword(
+        @CurrentUser() user: User,
+        @Body() changePasswordDto: ChangePasswordDto,
+    ): Promise<UserResponseDto> {
+        try {
+            const updatedUser = await this.authService.changePassword(
+                user.id,
+                changePasswordDto.old_password,
+                changePasswordDto.new_password,
+            );
+
+            return {
+                id: updatedUser.id,
+                username: updatedUser.username,
+                role: updatedUser.role,
+                is_first_login: updatedUser.isFirstLogin,
+                contact_info: updatedUser.contactInfo,
+            };
+        } catch (error) {
+            throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    @Post('forgot-password')
+    async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto): Promise<{ ok: boolean; message: string }> {
+        try {
+            await this.authService.forgotPasswordByIdentity(
+                forgotPasswordDto.username,
+                forgotPasswordDto.identity_last6,
+                forgotPasswordDto.new_password,
+            );
+            return { ok: true, message: 'Password updated' };
+        } catch (error) {
+            throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+        }
+    }
+}

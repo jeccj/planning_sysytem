@@ -27,8 +27,8 @@ const formatTime = (value) => {
 </script>
 
 <template>
-  <div class="announcement-wrapper">
-    <el-card class="glass-panel" shadow="never">
+  <div class="announcement-wrapper app-page app-page--narrow">
+    <el-card class="app-panel" shadow="never">
       <template #header>
         <div class="panel-header">
           <span>公告列表</span>
@@ -51,20 +51,8 @@ const formatTime = (value) => {
 
 <style scoped>
 .announcement-wrapper {
-  padding: 0 24px;
   width: 100%;
-  max-width: 1100px;
-  margin: 0 auto;
   box-sizing: border-box;
-}
-
-.glass-panel {
-  border-radius: 30px !important;
-  background: rgba(255, 255, 255, 0.4) !important;
-  backdrop-filter: blur(50px) saturate(160%);
-  -webkit-backdrop-filter: blur(50px) saturate(160%);
-  border: none !important;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.05);
 }
 
 .panel-header {
@@ -109,8 +97,6 @@ const formatTime = (value) => {
 }
 
 @media (max-width: 768px) {
-  .announcement-wrapper {
-    padding: 0 16px;
-  }
+  .announcement-wrapper { width: 100%; }
 }
 </style>

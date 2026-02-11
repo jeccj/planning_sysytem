@@ -41,7 +41,7 @@ defineEmits(['book', 'view-detail'])
             <!-- Right: Facilities & Action -->
             <div class="row-section action-section">
                 <div class="facilities-row d-none-mobile">
-                    <span v-for="f in (venue.facilities || []).slice(0, 3)" :key="f" class="micro-tag">{{ f }}</span>
+                     <span v-for="f in (venue.facilities || []).slice(0, 3)" :key="f" class="micro-tag">{{ f }}</span>
                 </div>
                 
                 <div class="action-buttons">
@@ -51,6 +51,15 @@ defineEmits(['book', 'view-detail'])
                     <div class="action-btn-circle" :class="{ 'is-busy': venue.status !== 'available' }" @click.stop="$emit('book', venue)" title="预约">
                         <el-icon><ArrowRight /></el-icon>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Match Details Pill (Animated) -->
+        <div v-if="venue.match_details && venue.match_details.length > 0" class="match-footer">
+            <div class="match-pill-container">
+                <div v-for="(detail, index) in venue.match_details" :key="index" class="match-reason-pill" :class="{'is-success': detail.includes('✅'), 'is-warning': detail.includes('⚠️'), 'is-danger': detail.includes('❌')}" :style="{ animationDelay: `${index * 50}ms` }">
+                    {{ detail }}
                 </div>
             </div>
         </div>
@@ -64,12 +73,16 @@ defineEmits(['book', 'view-detail'])
     padding: 0; /* Clear padding, handled by inner row */
     min-height: 88px; /* Compact Row Height */
     cursor: pointer;
+    /* overflow: hidden; Removed to allow potential pop-out effects if needed, but usually kept for border-radius. 
+       If we want the pill to expand the card, we need auto height which flex column provides. 
+       Let's keep overflow hidden for the glass effect but ensure height is auto. */
     overflow: hidden;
     transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
     display: flex;
     flex-direction: column;
     justify-content: center;
     width: 100%;
+    height: auto; /* Allow growth */
 }
 
 .card-glass-substrate {
@@ -260,6 +273,53 @@ defineEmits(['book', 'view-detail'])
     }
 }
 
+
+
+.match-footer {
+    padding: 0 32px 20px 32px; /* Match horizontal padding of card-content-row */
+    margin-top: -8px; 
+    position: relative;
+    z-index: 2;
+}
+
+.match-pill-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.match-reason-pill {
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(4px);
+    color: #333;
+    font-weight: 500;
+    opacity: 0;
+    transform: translateY(-10px);
+    animation: slideDownFade 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    border: 1px solid rgba(255,255,255,0.2);
+}
+
+.match-reason-pill.is-success { background: rgba(103, 194, 58, 0.15); color: #67c23a; border-color: rgba(103, 194, 58, 0.2); }
+.match-reason-pill.is-warning { background: rgba(230, 162, 60, 0.15); color: #e6a23c; border-color: rgba(230, 162, 60, 0.2); }
+.match-reason-pill.is-danger { background: rgba(245, 108, 108, 0.15); color: #f56c6c; border-color: rgba(245, 108, 108, 0.2); }
+
+@keyframes slideDownFade {
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 768px) {
+    .match-footer {
+        padding: 0 16px 16px 16px;
+    }
+}
+
 html.dark .venue-name, html.dark .type-pill { color: #eee; }
 html.dark .info-pill { background: rgba(255,255,255,0.1); color: #ccc; }
+html.dark .match-reason-pill { background: rgba(0,0,0,0.3); color: #ccc; }
 </style>

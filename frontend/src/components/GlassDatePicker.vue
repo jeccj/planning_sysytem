@@ -71,7 +71,8 @@ const formatDisplay = computed(() => {
         v-model="showPicker"
         width="90%"
         style="max-width: 380px"
-        append-to-body
+        :teleported="false"
+        :modal-append-to-body="false"
         class="glass-dialog spatial-modal"
         title="选择时间"
         align-center

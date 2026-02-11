@@ -5,6 +5,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const reservations = ref([])
 const filterStatus = ref('')
+const keyword = ref('')
+const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 
 const fetchReservations = async () => {
     try {
@@ -17,9 +19,38 @@ const fetchReservations = async () => {
 
 onMounted(() => fetchReservations())
 
+const auditStats = computed(() => {
+    const stats = { pending: 0, approved: 0, rejected: 0, used: 0, canceled: 0 }
+    reservations.value.forEach((item) => {
+        if (Object.prototype.hasOwnProperty.call(stats, item.status)) {
+            stats[item.status] += 1
+        }
+    })
+    return stats
+})
+
 const filteredReservations = computed(() => {
-    if (!filterStatus.value) return reservations.value
-    return reservations.value.filter(r => r.status === filterStatus.value)
+    const kw = keyword.value.trim().toLowerCase()
+    const filtered = reservations.value.filter((r) => {
+        const statusHit = !filterStatus.value || r.status === filterStatus.value
+        if (!statusHit) return false
+        if (!kw) return true
+        return [
+            r.activity_name,
+            r.organizer_unit,
+            r.contact_name,
+            r.contact_phone,
+            String(r.id)
+        ].some((field) => String(field || '').toLowerCase().includes(kw))
+    })
+
+    const statusPriority = { pending: 0, approved: 1, used: 2, rejected: 3, canceled: 4 }
+    return filtered.slice().sort((a, b) => {
+        const pa = statusPriority[a.status] ?? 9
+        const pb = statusPriority[b.status] ?? 9
+        if (pa !== pb) return pa - pb
+        return new Date(b.start_time).getTime() - new Date(a.start_time).getTime()
+    })
 })
 
 const handleDecision = async (id, status, reason = null) => {
@@ -74,10 +105,17 @@ const handleDelete = async (id) => {
         ElMessage.success("记录已删除")
         fetchReservations()
     } catch (e) {
-        if (e !== 'cancel') {
+        if (!isUserDismiss(e)) {
             ElMessage.error("删除失败")
         }
     }
+}
+
+const getProposalLink = (proposalUrl) => {
+    if (!proposalUrl) return ''
+    if (proposalUrl.startsWith('http://') || proposalUrl.startsWith('https://')) return proposalUrl
+    if (proposalUrl.startsWith('/api/')) return proposalUrl
+    return `/api${proposalUrl}`
 }
 
 const getRiskParams = (score) => {
@@ -107,80 +145,223 @@ const getStatusLabel = (status) => {
     }
     return map[status] || status
 }
+
+const formatDateTime = (value) => {
+    if (!value) return '-'
+    return new Date(value).toLocaleString('zh-CN')
+}
 </script>
 
 <template>
-    <div class="audit-panel">
-        <div class="filter-bar" style="margin-bottom: 16px;">
-            <el-select v-model="filterStatus" placeholder="筛选状态" clearable style="width: 150px">
-                <el-option label="全部" value="" />
-                <el-option label="待审核" value="pending" />
-                <el-option label="已通过" value="approved" />
-                <el-option label="已驳回" value="rejected" />
-                <el-option label="已取消" value="canceled" />
-                <el-option label="已使用" value="used" />
-            </el-select>
+    <div class="audit-panel app-page app-stack">
+        <div class="admin-toolbar audit-toolbar">
+            <div class="admin-toolbar__filters">
+                <el-input v-model="keyword" clearable placeholder="搜索活动 / 主办单位 / 联系人 / ID" class="toolbar-field toolbar-field--wide" />
+                <el-select v-model="filterStatus" placeholder="筛选状态" clearable class="toolbar-field">
+                    <el-option label="全部" value="" />
+                    <el-option label="待审核" value="pending" />
+                    <el-option label="已通过" value="approved" />
+                    <el-option label="已驳回" value="rejected" />
+                    <el-option label="已取消" value="canceled" />
+                    <el-option label="已使用" value="used" />
+                </el-select>
+            </div>
+            <div class="admin-toolbar__filters">
+                <span class="admin-toolbar__meta">待审核 {{ auditStats.pending }} 项</span>
+                <span class="admin-toolbar__meta">共 {{ filteredReservations.length }} / {{ reservations.length }} 条</span>
+            </div>
         </div>
 
-        <div class="audit-table-wrap">
-            <el-table :data="filteredReservations" style="width: 100%" size="large">
-                <el-table-column prop="activity_name" label="活动名称" width="180" />
-                <el-table-column prop="organizer_unit" label="申请单位" width="150" />
-                <el-table-column prop="proposal_content" label="提案内容" show-overflow-tooltip />
-                <el-table-column label="预约时间" width="180">
-                    <template #default="scope">
-                        <div style="font-size: 12px;">
-                            <div>{{ new Date(scope.row.start_time).toLocaleString('zh-CN') }}</div>
-                            <div style="color: #999;">至 {{ new Date(scope.row.end_time).toLocaleString('zh-CN') }}</div>
-                        </div>
+        <div class="audit-card-list">
+            <el-card
+                v-for="item in filteredReservations"
+                :key="item.id"
+                class="audit-card app-panel"
+                shadow="never"
+            >
+                <div class="card-head">
+                    <div class="head-main">
+                        <h3 class="activity-name">{{ item.activity_name }}</h3>
+                        <p class="org-name">{{ item.organizer_unit || '未知单位' }}</p>
+                    </div>
+                    <el-tag :type="getStatusType(item.status)">{{ getStatusLabel(item.status) }}</el-tag>
+                </div>
+
+                <div class="card-meta">
+                    <div class="meta-item">
+                        <span class="meta-label">开始</span>
+                        <span>{{ formatDateTime(item.start_time) }}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">结束</span>
+                        <span>{{ formatDateTime(item.end_time) }}</span>
+                    </div>
+                </div>
+
+                <div class="card-section">
+                    <p class="section-title">提案内容</p>
+                    <p class="proposal-text">{{ item.proposal_content || '暂无提案内容' }}</p>
+                    <a v-if="item.proposal_url" :href="getProposalLink(item.proposal_url)" target="_blank" class="proposal-link">
+                        下载策划书
+                    </a>
+                </div>
+
+                <div class="card-section">
+                    <p class="section-title">AI 风险评估</p>
+                    <template v-if="item.ai_risk_score !== null">
+                        <el-tag :type="getRiskParams(item.ai_risk_score).type" effect="dark" size="small">
+                            {{ getRiskParams(item.ai_risk_score).label }} ({{ item.ai_risk_score }})
+                        </el-tag>
+                        <p class="audit-comment">AI 意见: {{ item.ai_audit_comment || '无' }}</p>
                     </template>
-                </el-table-column>
-                <el-table-column label="状态" width="100">
-                    <template #default="scope">
-                        <el-tag :type="getStatusType(scope.row.status)">{{ getStatusLabel(scope.row.status) }}</el-tag>
+                    <el-tag v-else type="info" size="small">分析中...</el-tag>
+                </div>
+
+                <div class="card-actions">
+                    <template v-if="item.status === 'pending'">
+                        <el-button type="success" size="small" @click="handleDecision(item.id, 'approved')">通过</el-button>
+                        <el-button type="danger" size="small" @click="handleDecision(item.id, 'rejected', '不符合安全规定')">驳回</el-button>
                     </template>
-                </el-table-column>
-                <el-table-column label="AI 风险评估" width="280">
-                    <template #default="scope">
-                        <div v-if="scope.row.ai_risk_score !== null">
-                            <el-tag :type="getRiskParams(scope.row.ai_risk_score).type" effect="dark" size="small">
-                                {{ getRiskParams(scope.row.ai_risk_score).label }} ({{ scope.row.ai_risk_score }})
-                            </el-tag>
-                            <p class="audit-comment">AI 意见: {{ scope.row.ai_audit_comment }}</p>
-                        </div>
-                        <div v-else>
-                            <el-tag type="info" size="small">分析中...</el-tag>
-                        </div>
-                    </template>
-                </el-table-column>
-                <el-table-column label="操作" width="280">
-                    <template #default="scope">
-                        <template v-if="scope.row.status === 'pending'">
-                            <el-button type="success" size="small"
-                                @click="handleDecision(scope.row.id, 'approved')">通过</el-button>
-                            <el-button type="danger" size="small"
-                                @click="handleDecision(scope.row.id, 'rejected', '不符合安全规定')">驳回</el-button>
-                        </template>
-                        <el-button 
-                            v-if="canMarkUsed(scope.row)" 
-                            type="primary" 
-                            size="small"
-                            @click="handleMarkUsed(scope.row)"
-                        >
-                            标记已使用
-                        </el-button>
-                        <el-button type="danger" size="small" plain @click="handleDelete(scope.row.id)">删除</el-button>
-                    </template>
-                </el-table-column>
-            </el-table>
+                    <el-button v-if="canMarkUsed(item)" type="primary" size="small" @click="handleMarkUsed(item)">
+                        标记已使用
+                    </el-button>
+                    <el-button type="danger" size="small" plain @click="handleDelete(item.id)">删除</el-button>
+                </div>
+            </el-card>
         </div>
+
+        <el-empty v-if="filteredReservations.length === 0" description="暂无待处理活动" />
     </div>
 </template>
 
 <style scoped>
+.audit-toolbar {
+    --toolbar-field-width: 160px;
+}
+
+.toolbar-field--wide {
+    --toolbar-field-width: 250px;
+}
+
+.audit-card-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 14px;
+}
+
+.audit-card {
+    border-radius: 22px !important;
+}
+
+.card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.activity-name {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.org-name {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: #70727a;
+}
+
+.card-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    background: rgba(255, 255, 255, 0.34);
+    border-radius: 12px;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+.meta-label {
+    color: #8d8f96;
+}
+
+.card-section {
+    margin-bottom: 12px;
+}
+
+.section-title {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: #8d8f96;
+    font-weight: 600;
+}
+
+.proposal-text {
+    margin: 0;
+    line-height: 1.6;
+    font-size: 13px;
+    color: #2d2f34;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.proposal-link {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #4052b5;
+}
+
 .audit-comment {
     font-size: 12px;
     color: #666;
-    margin-top: 5px;
+    margin-top: 6px;
+}
+
+.card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+html.dark .org-name,
+html.dark .meta-label,
+html.dark .section-title {
+    color: #a9acb6;
+}
+
+html.dark .meta-item {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+html.dark .proposal-text,
+html.dark .audit-comment {
+    color: #e7e9ef;
+}
+
+html.dark .proposal-link {
+    color: #9cb3ff;
+}
+
+@media (max-width: 768px) {
+    .audit-card-list {
+        grid-template-columns: 1fr;
+    }
+
+    .card-meta {
+        grid-template-columns: 1fr;
+    }
 }
 </style>

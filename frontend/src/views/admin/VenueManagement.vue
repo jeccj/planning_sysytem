@@ -1,18 +1,29 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ArrowDown } from '@element-plus/icons-vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const route = useRoute()
+const router = useRouter()
 const venues = ref([])
 const users = ref([])
 const showModal = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
+const keyword = ref('')
+const statusFilter = ref('')
+const showBuildingView = ref(false)
+const selectedBuilding = ref('')
 
 const form = ref({
   name: '',
   type: 'Classroom',
   capacity: 30,
+  building_name: '',
+  floor_label: '',
+  room_code: '',
   location: '',
   facilities: [],
   status: 'available',
@@ -22,10 +33,11 @@ const form = ref({
 })
 
 const facilitiesOptions = ['投影仪', '音响设备', '白板', '电脑', '舞台']
+const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 
 // 获取可分配为场地管理员的用户列表
 const venueAdmins = computed(() => {
-  return users.value.filter(u => u.role === 'venue_admin')
+  return users.value.filter(u => ['venue_admin', 'floor_admin'].includes(u.role))
 })
 
 const fetchVenues = async () => {
@@ -44,7 +56,7 @@ const fetchUsers = async () => {
 
 const getAdminName = (adminId) => {
   if (!adminId) return '未分配'
-  const admin = users.value.find(u => u.id === adminId)
+  const admin = users.value.find(u => Number(u.id) === Number(adminId))
   return admin ? admin.username : '未知'
 }
 
@@ -53,11 +65,25 @@ onMounted(() => {
   fetchUsers()
 })
 
-const openCreate = () => {
+watch(
+    () => route.query.qa_ts,
+    () => {
+        if (route.query.qa === 'create-venue') {
+            openCreate()
+            const nextQuery = { ...route.query }
+            delete nextQuery.qa
+            delete nextQuery.qa_ts
+            router.replace({ path: route.path, query: nextQuery })
+        }
+    },
+    { immediate: true }
+)
+
+function openCreate() {
     isEdit.value = false
     currentId.value = null
     form.value = { 
-        name: '', type: 'Classroom', capacity: 30, location: '', 
+        name: '', type: 'Classroom', capacity: 30, building_name: '', floor_label: '', room_code: '', location: '', 
         facilities: [], status: 'available', admin_id: null,
         open_hours: '', description: ''
     }
@@ -73,9 +99,16 @@ const openEdit = (venue) => {
 
 const submitForm = async () => {
     try {
+        const capacity = Number(form.value.capacity)
+        if (!Number.isFinite(capacity) || capacity < 1) {
+            ElMessage.warning('容纳人数需为大于 0 的整数')
+            return
+        }
+
         const payload = {
             ...form.value,
-            capacity: parseInt(form.value.capacity)
+            capacity: Math.floor(capacity),
+            location: form.value.location || [form.value.building_name, form.value.floor_label, form.value.room_code].filter(Boolean).join(' ')
         }
         
         if (isEdit.value) {
@@ -116,7 +149,7 @@ const toggleStatus = async (venue) => {
         ElMessage.success(newStatus === 'maintenance' ? '已设为维护中，相关用户已收到通知' : '场地已恢复可用')
         fetchVenues()
     } catch (e) {
-        if (e !== 'cancel') {
+        if (!isUserDismiss(e)) {
             ElMessage.error('操作失败')
             console.error(e)
         }
@@ -135,110 +168,219 @@ const handleDelete = async (venue) => {
         ElMessage.success('场馆已删除')
         fetchVenues()
     } catch (e) {
-        if (e !== 'cancel') {
+        if (!isUserDismiss(e)) {
              ElMessage.error(e.response?.data?.detail || '删除失败')
              console.error(e)
         }
     }
 }
+const showMaintenanceModal = ref(false)
+const maintenanceForm = ref({
+    start_time: '',
+    end_time: '',
+    reason: '设施维护'
+})
+const selectedVenueForMaintenance = ref(null)
+
+const openMaintenance = (venue) => {
+    selectedVenueForMaintenance.value = venue
+    maintenanceForm.value = {
+        start_time: '',
+        end_time: '',
+        reason: '设施维护'
+    }
+    showMaintenanceModal.value = true
+}
+
+const submitMaintenance = async () => {
+    if (!maintenanceForm.value.start_time || !maintenanceForm.value.end_time) {
+        ElMessage.error('请选择开始和结束时间')
+        return
+    }
+
+    const startAt = new Date(maintenanceForm.value.start_time)
+    const endAt = new Date(maintenanceForm.value.end_time)
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {
+        ElMessage.warning('维护结束时间必须晚于开始时间')
+        return
+    }
+    
+    try {
+        await api.post(`/venues/${selectedVenueForMaintenance.value.id}/maintenance`, {
+            start: maintenanceForm.value.start_time,
+            end: maintenanceForm.value.end_time,
+            reason: maintenanceForm.value.reason
+        })
+        ElMessage.success('维护计划已添加')
+        showMaintenanceModal.value = false
+        // No need to fetch venues as status might not change globally, but we could
+    } catch (e) {
+        ElMessage.error(e.response?.data?.message || '设置失败：时间冲突')
+    }
+}
+
+const filteredVenues = computed(() => {
+    const kw = keyword.value.trim().toLowerCase()
+    return venues.value.filter((venue) => {
+        const statusHit = !statusFilter.value || venue.status === statusFilter.value
+        if (!statusHit) return false
+        if (!kw) return true
+        return [
+            venue.name,
+            venue.building_name,
+            venue.location,
+            getAdminName(venue.admin_id),
+            String(venue.id)
+        ].some((item) => String(item || '').toLowerCase().includes(kw))
+    })
+})
+
+const getVenueBuilding = (venue) => {
+    if (venue?.building_name) return venue.building_name
+    const text = (venue?.location || '').trim()
+    if (!text) return '未分区'
+    return text.split(/\s+/)[0] || '未分区'
+}
+
+const groupedBuildings = computed(() => {
+    const map = new Map()
+    filteredVenues.value.forEach((venue) => {
+        const building = getVenueBuilding(venue)
+        const bucket = map.get(building) || []
+        bucket.push(venue)
+        map.set(building, bucket)
+    })
+
+    return Array.from(map.entries())
+        .map(([name, items]) => {
+            const availableCount = items.filter((item) => item.status === 'available').length
+            const maintenanceCount = items.filter((item) => item.status === 'maintenance').length
+            return {
+                name,
+                total: items.length,
+                available: availableCount,
+                maintenance: maintenanceCount,
+                classrooms: items.slice().sort((a, b) => String(a.room_code || a.name).localeCompare(String(b.room_code || b.name), 'zh-CN')),
+            }
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+})
+
+const activeBuildingClassrooms = computed(() => {
+    if (!selectedBuilding.value) return []
+    const item = groupedBuildings.value.find((group) => group.name === selectedBuilding.value)
+    return item?.classrooms || []
+})
+
+const openBuildingDetail = (buildingName) => {
+    selectedBuilding.value = buildingName
+    showBuildingView.value = true
+}
 </script>
 
 <template>
-  <div>
-    <div class="header-actions">
-        <el-button type="primary" @click="openCreate" size="large">新增场馆</el-button>
+  <div class="app-page app-stack">
+    <div class="admin-toolbar venue-admin-toolbar">
+      <div class="admin-toolbar__filters">
+        <el-input
+          v-model="keyword"
+          clearable
+          placeholder="搜索场馆 / 位置 / 管理员"
+          class="toolbar-field toolbar-field--wide"
+        />
+        <el-select v-model="statusFilter" clearable placeholder="状态筛选" class="toolbar-field">
+          <el-option label="全部状态" value="" />
+          <el-option label="可用" value="available" />
+          <el-option label="维护中" value="maintenance" />
+        </el-select>
+      </div>
+      <div class="admin-toolbar__filters">
+        <span class="admin-toolbar__meta">共 {{ filteredVenues.length }} / {{ venues.length }} 个场馆</span>
+        <el-button type="primary" @click="openCreate">新增场馆</el-button>
+      </div>
     </div>
 
-    <el-card shadow="never" class="desktop-table">
-      <el-table :data="venues" style="width: 100%" size="large">
-        <el-table-column prop="id" label="编号" width="70" />
-        <el-table-column prop="name" label="场馆名称" width="150" />
-        <el-table-column prop="type" label="类型" width="100">
-           <template #default="scope">
-              <el-tag effect="plain">{{ { 'Classroom': '教室', 'Hall': '礼堂', 'Lab': '实验室' }[scope.row.type] || scope.row.type }}</el-tag>
-           </template>
-        </el-table-column>
-        <el-table-column prop="capacity" label="容量" width="80" />
-        <el-table-column prop="location" label="位置" width="120" />
-        <el-table-column label="管理员" width="100">
-          <template #default="scope">
-            <el-tag v-if="scope.row.admin_id" type="info">{{ getAdminName(scope.row.admin_id) }}</el-tag>
-            <span v-else style="color: #999">未分配</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="设施" width="200">
-          <template #default="scope">
-             <el-tag v-for="f in scope.row.facilities" :key="f" size="small" style="margin-right:5px" type="info">{{ f }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-            <template #default="scope">
-                <el-tag :type="scope.row.status === 'available' ? 'success' : 'danger'" effect="dark">
-                  {{ scope.row.status === 'available' ? '可用' : '维护中' }}
-                </el-tag>
-            </template>
-        </el-table-column>
-        <el-table-column label="操作" width="230" fixed="right">
-          <template #default="scope">
-              <el-button size="small" type="primary" plain @click="openEdit(scope.row)">编辑</el-button>
-              <el-button 
-                size="small" 
-                :type="scope.row.status === 'available' ? 'warning' : 'success'" 
-                plain 
-                @click="toggleStatus(scope.row)"
-              >
-                {{ scope.row.status === 'available' ? '维护' : '恢复' }}
-              </el-button>
-              <el-button size="small" type="danger" plain @click="handleDelete(scope.row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <!-- Mobile Cards -->
-    <div class="mobile-cards">
-      <el-card v-for="venue in venues" :key="venue.id" class="venue-card" shadow="hover">
-        <div class="card-header">
-          <h3>{{ venue.name }}</h3>
-          <el-tag :type="venue.status === 'available' ? 'success' : 'danger'" effect="dark" size="small">
-            {{ venue.status === 'available' ? '可用' : '维护中' }}
-          </el-tag>
+    <div class="building-grid">
+      <el-card v-for="building in groupedBuildings" :key="building.name" shadow="never" class="building-card app-panel">
+        <div class="building-card__head">
+          <div>
+            <div class="building-name">{{ building.name }}</div>
+            <div class="building-meta">共 {{ building.total }} 间教室</div>
+          </div>
+          <el-button size="small" type="primary" plain @click="openBuildingDetail(building.name)">查看教室</el-button>
         </div>
-        <div class="card-body">
-          <div class="info-row">
-            <span class="label">类型:</span>
-            <el-tag effect="plain" size="small">{{ { 'Classroom': '教室', 'Hall': '礼堂', 'Lab': '实验室' }[venue.type] }}</el-tag>
-          </div>
-          <div class="info-row">
-            <span class="label">容量:</span>
-            <span>{{ venue.capacity }}人</span>
-          </div>
-          <div class="info-row">
-            <span class="label">位置:</span>
-            <span>{{ venue.location }}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">管理员:</span>
-            <span>{{ getAdminName(venue.admin_id) }}</span>
-          </div>
-          <div v-if="venue.facilities.length > 0" class="info-row">
-            <span class="label">设施:</span>
-            <div class="tags-wrap">
-              <el-tag v-for="f in venue.facilities" :key="f" size="small" type="info">{{ f }}</el-tag>
-            </div>
-          </div>
-        </div>
-        <div class="card-actions">
-          <el-button size="small" type="primary" plain @click="openEdit(venue)">编辑</el-button>
-          <el-button size="small" :type="venue.status === 'available' ? 'warning' : 'success'" plain @click="toggleStatus(venue)">
-            {{ venue.status === 'available' ? '维护' : '恢复' }}
-          </el-button>
-          <el-button size="small" type="danger" plain @click="handleDelete(venue)">删除</el-button>
+        <div class="building-card__stats">
+          <span class="stat-pill ok">空闲 {{ building.available }}</span>
+          <span class="stat-pill warn">维护 {{ building.maintenance }}</span>
+          <span class="stat-pill">总数 {{ building.total }}</span>
         </div>
       </el-card>
     </div>
+    <el-empty v-if="groupedBuildings.length === 0" description="没有符合条件的楼栋" />
 
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" class="glass-dialog">
+    <el-dialog
+      v-model="showBuildingView"
+      :title="`${selectedBuilding} · 教室列表`"
+      width="820px"
+      :teleported="false"
+      :modal-append-to-body="false"
+      class="glass-dialog"
+    >
+      <div class="venue-grid">
+        <el-card v-for="venue in activeBuildingClassrooms" :key="venue.id" shadow="never" class="venue-compact-card app-panel">
+          <div class="venue-head">
+            <div class="venue-title-wrap">
+              <h3>{{ venue.name }}</h3>
+              <span class="venue-id">#{{ venue.id }}</span>
+            </div>
+            <el-tag :type="venue.status === 'available' ? 'success' : 'danger'" effect="dark" size="small">
+              {{ venue.status === 'available' ? '可用' : '维护中' }}
+            </el-tag>
+          </div>
+
+          <div class="venue-pill-row">
+            <span class="meta-pill">{{ { 'Classroom': '教室', 'Hall': '礼堂', 'Lab': '实验室' }[venue.type] || venue.type }}</span>
+            <span class="meta-pill">{{ venue.floor_label || '未知楼层' }}</span>
+            <span class="meta-pill">{{ venue.room_code || venue.room_name || venue.location || '房间未填' }}</span>
+            <span class="meta-pill">{{ venue.capacity }} 人</span>
+            <span class="meta-pill">管理员：{{ getAdminName(venue.admin_id) }}</span>
+          </div>
+
+          <div class="venue-pill-row" v-if="venue.open_hours">
+            <span class="meta-pill meta-pill--wide">开放时间：{{ venue.open_hours }}</span>
+          </div>
+
+          <div class="venue-pill-row" v-if="venue.facilities.length > 0">
+            <el-tag v-for="f in venue.facilities" :key="f" size="small" type="info" effect="plain">{{ f }}</el-tag>
+          </div>
+
+          <div class="venue-actions">
+            <el-button size="small" type="primary" plain @click="openEdit(venue)">编辑</el-button>
+            <el-dropdown trigger="click">
+              <el-button size="small" type="warning" plain>
+                维护 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="openMaintenance(venue)">预约维护</el-dropdown-item>
+                  <el-dropdown-item @click="toggleStatus(venue)">
+                    {{ venue.status === 'available' ? '立即设为不可用' : '立即恢复可用' }}
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-button size="small" type="danger" plain @click="handleDelete(venue)">删除</el-button>
+          </div>
+        </el-card>
+      </div>
+      <el-empty v-if="activeBuildingClassrooms.length === 0" description="该楼栋暂无教室" />
+      <template #footer>
+        <el-button @click="showBuildingView = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Create/Edit Modal -->
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
         <el-form :model="form" label-width="100px">
             <el-row :gutter="20">
               <el-col :span="12">
@@ -264,8 +406,21 @@ const handleDelete = async (venue) => {
                 </el-form-item>
               </el-col>
               <el-col :span="12">
-                <el-form-item label="具体位置">
-                    <el-input v-model="form.location" placeholder="例如：A栋 301" />
+                <el-form-item label="楼栋">
+                    <el-input v-model="form.building_name" placeholder="例如：A栋" />
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="楼层">
+                    <el-input v-model="form.floor_label" placeholder="例如：3层 / B1层" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="教室编码">
+                    <el-input v-model="form.room_code" placeholder="例如：301 / A111" />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -293,6 +448,10 @@ const handleDelete = async (venue) => {
               </el-col>
             </el-row>
 
+            <el-form-item label="位置描述(兼容字段)">
+                <el-input v-model="form.location" placeholder="可留空，系统将按楼栋+楼层+教室自动生成" />
+            </el-form-item>
+
             <el-form-item label="开放时间">
                 <el-input v-model="form.open_hours" placeholder="例如：周一至周五 8:00-22:00" />
             </el-form-item>
@@ -317,94 +476,216 @@ const handleDelete = async (venue) => {
             <el-button type="primary" @click="submitForm">保存</el-button>
         </template>
     </el-dialog>
+
+    <!-- Maintenance Schedule Modal -->
+    <el-dialog v-model="showMaintenanceModal" title="预约维护时段" width="500px" :teleported="false" :modal-append-to-body="false" class="glass-dialog">
+        <el-form :model="maintenanceForm" label-width="80px">
+            <el-form-item label="原因">
+                <el-input v-model="maintenanceForm.reason" placeholder="例如：设备检修" />
+            </el-form-item>
+            <el-form-item label="起止时间">
+                <el-date-picker
+                    v-model="maintenanceForm.start_time"
+                    type="datetime"
+                    placeholder="开始时间"
+                    style="width: 100%; margin-bottom: 10px;"
+                />
+                <el-date-picker
+                    v-model="maintenanceForm.end_time"
+                    type="datetime"
+                    placeholder="结束时间"
+                    style="width: 100%;"
+                />
+            </el-form-item>
+        </el-form>
+        <template #footer>
+            <el-button @click="showMaintenanceModal = false">取消</el-button>
+            <el-button type="primary" @click="submitMaintenance">确认预约维护</el-button>
+        </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.header-actions {
+.venue-admin-toolbar {
+    --toolbar-field-width: 170px;
+}
+
+.toolbar-field--wide {
+    --toolbar-field-width: 240px;
+}
+
+.building-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+}
+
+.building-card {
+    border-radius: 20px !important;
+}
+
+.building-card :deep(.el-card__body) {
+    padding: 14px !important;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.building-card__head {
     display: flex;
     justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.building-name {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.building-meta {
+    margin-top: 2px;
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+.building-card__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.stat-pill {
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    line-height: 1.2;
+    background: rgba(255, 255, 255, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.stat-pill.ok {
+    color: #2f9d57;
+}
+
+.stat-pill.warn {
+    color: #c9862f;
+}
+
+html.dark .stat-pill {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.venue-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.venue-compact-card {
+    border-radius: 20px !important;
+}
+
+.venue-compact-card :deep(.el-card__body) {
+    padding: 14px !important;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.venue-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.venue-title-wrap {
+    min-width: 0;
+}
+
+.venue-title-wrap h3 {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.venue-id {
+    margin-top: 2px;
+    display: inline-block;
+    font-size: 11px;
+    opacity: 0.62;
+}
+
+.venue-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.meta-pill {
+    max-width: 100%;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    line-height: 1.2;
+    background: rgba(255, 255, 255, 0.34);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.meta-pill--wide {
+    max-width: 100%;
+}
+
+html.dark .meta-pill {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.venue-actions {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    margin-bottom: 20px;
+    gap: 6px;
 }
 
-/* Desktop: show table */
-@media (min-width: 769px) {
-    .mobile-cards { display: none; }
+.venue-actions .el-button {
+    height: 30px;
+    padding: 0 12px;
+    font-size: 12px;
 }
 
-/* Mobile: show cards */
 @media (max-width: 768px) {
-    .desktop-table { 
-        display: none !important; 
-    }
-    
-    .mobile-cards {
-        display: flex;
-        flex-direction: column;
+    .building-grid,
+    .venue-grid {
+        grid-template-columns: 1fr;
         gap: 10px;
     }
-    
-    .venue-card {
-        border-radius: 12px;
-        transition: all 0.2s;
+
+    .venue-compact-card :deep(.el-card__body) {
+        padding: 12px !important;
+        gap: 8px;
     }
-    
-    .venue-card:active {
-        transform: scale(0.98);
+
+    .meta-pill {
+        font-size: 11px;
+        padding: 4px 9px;
     }
-    
-    .card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid #ebeef5;
-    }
-    
-    .card-header h3 {
-        margin: 0;
-        font-size: 15px;
-        font-weight: 600;
-    }
-    
-    .card-body {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        margin-bottom: 10px;
-    }
-    
-    .info-row {
-        display: flex;
-        align-items: center;
-        font-size: 13px;
-    }
-    
-    .info-row .label {
-        font-weight: 500;
-        color: #909399;
-        min-width: 55px;
-        margin-right: 6px;
-    }
-    
-    .tags-wrap {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-    }
-    
-    .card-actions {
-        display: flex;
-        gap: 6px;
-        padding-top: 10px;
-        border-top: 1px solid #ebeef5;
-    }
-    
-    .card-actions el-button {
-        flex: 1;
-        font-size: 12px;
+
+    .venue-actions .el-button {
+        height: 28px;
+        padding: 0 10px;
+        font-size: 11px;
     }
 }
 </style>
