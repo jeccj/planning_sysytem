@@ -17,7 +17,9 @@ defineEmits(['book', 'view-detail'])
             <!-- Left: Title & Type -->
             <div class="row-section title-section" @click="$emit('view-detail', venue)">
                 <div class="venue-icon">
-                    <img v-if="venue.image" :src="venue.image" />
+                    <img v-if="venue.photos && venue.photos.length > 0" :src="venue.photos[0]" />
+                    <img v-else-if="venue.image_url" :src="venue.image_url" />
+                    <img v-else-if="venue.image" :src="venue.image" />
                     <el-icon v-else><Collection /></el-icon>
                 </div>
                 <div class="text-group">

@@ -1,4 +1,7 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpException, HttpStatus, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { VenuesService } from './venues.service';
 import { CreateVenueDto } from './dto/create-venue.dto';
 import { VenueResponseDto } from './dto/venue-response.dto';
@@ -152,6 +155,63 @@ export class VenuesController {
         }));
     }
 
+    @Post(':id/photos')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    @UseInterceptors(FilesInterceptor('photos', 10, {
+        storage: diskStorage({
+            destination: './uploads/venues',
+            filename: (_req, file, cb) => {
+                const rand = Array(24).fill(null).map(() => Math.round(Math.random() * 16).toString(16)).join('');
+                cb(null, `${rand}${extname(file.originalname)}`);
+            },
+        }),
+        fileFilter: (_req, file, cb) => {
+            if (!file.mimetype.match(/^image\//)) {
+                return cb(new HttpException('仅允许上传图片文件', HttpStatus.BAD_REQUEST), false);
+            }
+            cb(null, true);
+        },
+        limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    }))
+    async uploadPhotos(
+        @CurrentUser() user: User,
+        @Param('id') id: string,
+        @UploadedFiles() files: Array<Express.Multer.File>,
+    ): Promise<VenueResponseDto> {
+        const venue = await this.venuesService.findOne(+id);
+        if (!venue) throw new HttpException('Venue not found', HttpStatus.NOT_FOUND);
+        this.assertScopedAdminVenueAccess(user, venue);
+        const newUrls = (files || []).map(f => `/uploads/venues/${f.filename}`);
+        const existingPhotos: string[] = Array.isArray(venue.photos) ? venue.photos : [];
+        const updated = await this.venuesService.update(+id, { photos: [...existingPhotos, ...newUrls] } as any);
+        return this.toResponseDto(updated);
+    }
+
+    @Delete(':id/photos')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    async deletePhoto(
+        @CurrentUser() user: User,
+        @Param('id') id: string,
+        @Body('url') url: string,
+    ): Promise<VenueResponseDto> {
+        const venue = await this.venuesService.findOne(+id);
+        if (!venue) throw new HttpException('Venue not found', HttpStatus.NOT_FOUND);
+        this.assertScopedAdminVenueAccess(user, venue);
+        const existingPhotos: string[] = Array.isArray(venue.photos) ? venue.photos : [];
+        const filtered = existingPhotos.filter(p => p !== url);
+        const updated = await this.venuesService.update(+id, { photos: filtered } as any);
+        // Best-effort delete file from disk
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            const filePath = path.join(__dirname, '..', '..', url);
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        } catch { /* ignore */ }
+        return this.toResponseDto(updated);
+    }
+
     private toResponseDto(venue: any): VenueResponseDto {
         const parsedLocation = parseVenueLocation(venue.location, venue.name);
         return {
@@ -167,6 +227,7 @@ export class VenuesController {
             facilities: typeof venue.facilities === 'string' ? JSON.parse(venue.facilities) : venue.facilities,
             status: venue.status,
             image_url: venue.imageUrl,
+            photos: Array.isArray(venue.photos) ? venue.photos : [],
             open_hours: venue.openHours,
             description: venue.description,
             admin_id: venue.adminId,

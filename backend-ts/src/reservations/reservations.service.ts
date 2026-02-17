@@ -72,24 +72,24 @@ export class ReservationsService {
             .createQueryBuilder('reservation')
             .leftJoinAndSelect('reservation.user', 'user')
             .leftJoinAndSelect('reservation.venue', 'venue')
-            .orderBy('reservation.start_time', 'DESC')
+            .orderBy('reservation.startTime', 'DESC')
             .skip(skip)
             .take(limit);
 
         if (filter?.adminId) {
-            qb.andWhere('venue.admin_id = :adminId', { adminId: filter.adminId });
+            qb.andWhere('venue.adminId = :adminId', { adminId: filter.adminId });
         }
         if (filter?.userId) {
-            qb.andWhere('reservation.user_id = :userId', { userId: filter.userId });
+            qb.andWhere('reservation.userId = :userId', { userId: filter.userId });
         }
         if (filter?.buildingName) {
-            qb.andWhere('(venue.building_name = :buildingName OR venue.location LIKE :buildingLike)', {
+            qb.andWhere('(venue.buildingName = :buildingName OR venue.location LIKE :buildingLike)', {
                 buildingName: filter.buildingName,
                 buildingLike: `%${filter.buildingName}%`,
             });
         }
         if (filter?.floorLabel) {
-            qb.andWhere('venue.floor_label = :floorLabel', { floorLabel: filter.floorLabel });
+            qb.andWhere('venue.floorLabel = :floorLabel', { floorLabel: filter.floorLabel });
         }
 
         return qb.getMany();

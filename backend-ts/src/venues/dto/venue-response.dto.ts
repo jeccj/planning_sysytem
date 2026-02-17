@@ -13,6 +13,7 @@ export class VenueResponseDto {
     facilities: string[];
     status: VenueStatus;
     image_url?: string;
+    photos?: string[];
     open_hours?: string;
     description?: string;
     admin_id?: number;

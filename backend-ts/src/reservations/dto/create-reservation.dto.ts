@@ -1,6 +1,8 @@
 import { IsString, IsNotEmpty, IsInt, IsOptional, IsDateString, Matches } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateReservationDto {
+    @Type(() => Number)
     @IsInt()
     @IsNotEmpty()
     venue_id: number;
@@ -35,6 +37,7 @@ export class CreateReservationDto {
     @IsNotEmpty()
     contact_phone: string;
 
+    @Type(() => Number)
     @IsInt()
     @IsNotEmpty()
     attendees_count: number;

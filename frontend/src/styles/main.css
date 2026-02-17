@@ -688,27 +688,36 @@ html.dark .el-overlay {
     inset: 0 !important;
     border-radius: 0;
     overflow: hidden;
+    z-index: 2000;
 }
 
 .content-shell .el-overlay .el-overlay-dialog {
     position: fixed !important;
     inset: 0 !important;
-    overflow: hidden !important;
+    overflow: auto !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .content-shell .el-dialog.glass-dialog {
-    position: fixed !important;
+    position: relative !important;
     background: var(--sheet-bg) !important;
     border: 1px solid var(--sheet-border) !important;
-    left: 50% !important;
-    top: calc(var(--dialog-safe-top) + ((100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom)) / 2)) !important;
-    transform: translate(-50%, -50%) translateZ(0) !important;
-    margin: 0 !important;
-    max-height: calc(100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom)) !important;
+    margin: auto !important;
+    left: auto !important;
+    top: auto !important;
+    transform: none !important;
+    max-height: calc(100dvh - 80px) !important;
+    display: flex;
+    flex-direction: column;
 }
 
 .content-shell .el-dialog.glass-dialog .el-dialog__body {
-    max-height: calc(100dvh - var(--dialog-safe-top) - var(--dialog-safe-bottom) - 140px) !important;
+    max-height: calc(100dvh - 220px) !important;
+    overflow-y: auto !important;
+    flex: 1;
+    min-height: 0;
 }
 
 .el-dialog .vibrant-glass-card .card-glass-substrate {
