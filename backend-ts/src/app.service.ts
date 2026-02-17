@@ -1,8 +1,1 @@
-import { Injectable } from '@nestjs/common';
-
-@Injectable()
-export class AppService {
-  getHello(): string {
-    return 'Hello World!';
-  }
-}
+// AppService removed — unused. AppController.root() returns a static message directly.

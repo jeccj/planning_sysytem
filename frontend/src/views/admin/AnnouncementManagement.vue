@@ -3,6 +3,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatTime, isUserDismiss } from '../../utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,7 +12,6 @@ const keyword = ref('')
 const showModal = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
-const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 
 const form = ref({
   title: '',
@@ -111,10 +111,6 @@ const handleDelete = async (row) => {
   }
 }
 
-const formatTime = (value) => {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
 
 const filteredAnnouncements = computed(() => {
   const kw = keyword.value.trim().toLowerCase()

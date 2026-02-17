@@ -5,6 +5,7 @@ import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Monitor, ChatSquare, User, DataAnalysis, Close } from '@element-plus/icons-vue'
 import { useAuthStore } from '../../stores/auth'
+import { formatTime, getNoticePreview, getStatusLabel, getVenueBuildingName, isUserDismiss } from '../../utils/formatters'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -20,7 +21,7 @@ const canAccessVenueTab = computed(() => {
 const statsRowClass = computed(() => ({
   'stats-row--single': !isSysAdmin.value,
 }))
-const isUserDismiss = (error) => error === 'cancel' || error === 'close'
+
 const classroomTypeSet = new Set(['Classroom', '教室'])
 const buildingFallbackNotified = ref(false)
 
@@ -37,13 +38,7 @@ const createEmptyBuildingAvailability = () => ({
   classrooms: []
 })
 
-const getVenueBuildingName = (venue) => {
-  const explicit = (venue?.building_name || venue?.buildingName || '').toString().trim()
-  if (explicit) return explicit
-  const location = (venue?.location || '').toString().trim()
-  if (!location) return '未分配楼栋'
-  return location.split(/\s+/)[0] || '未分配楼栋'
-}
+
 
 const getVenueFloorLabel = (venue) => {
   const explicit = (venue?.floor_label || venue?.floorLabel || '').toString().trim()
@@ -302,17 +297,7 @@ const handleDeleteActivity = async (id) => {
     }
 }
 
-const getStatusLabel = (status) => {
-    const map = {
-        'pending': '待审核',
-        'approved': '已通过',
-        'rejected': '已驳回',
-        'canceled': '已取消',
-        'used': '已使用',
-        'maintenance': '维护中'
-    }
-    return map[status] || status
-}
+
 
 const fetchLatestAnnouncement = async () => {
     try {
@@ -326,15 +311,7 @@ const fetchLatestAnnouncement = async () => {
     }
 }
 
-const formatTime = (value) => {
-    if (!value) return ''
-    return new Date(value).toLocaleString()
-}
 
-const getNoticePreview = (text) => {
-    if (!text) return ''
-    return text.length > 80 ? `${text.slice(0, 80)}...` : text
-}
 
 const goToAnnouncements = () => {
     router.push('/announcements')

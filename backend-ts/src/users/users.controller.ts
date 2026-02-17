@@ -17,32 +17,14 @@ export class UsersController {
 
     @Get('me')
     async getCurrentUser(@CurrentUser() user: User): Promise<UserResponseDto> {
-        return {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            is_first_login: user.isFirstLogin,
-            contact_info: user.contactInfo,
-            identity_last6: user.identityLast6,
-            managed_building: user.managedBuilding,
-            managed_floor: user.managedFloor,
-        };
+        return UserResponseDto.fromEntity(user);
     }
 
     @Get()
     @Roles(UserRole.SYS_ADMIN)
     async findAll(): Promise<UserResponseDto[]> {
         const users = await this.usersService.findAll();
-        return users.map(user => ({
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            is_first_login: user.isFirstLogin,
-            contact_info: user.contactInfo,
-            identity_last6: user.identityLast6,
-            managed_building: user.managedBuilding,
-            managed_floor: user.managedFloor,
-        }));
+        return users.map(UserResponseDto.fromEntity);
     }
 
     @Get('credentials')
@@ -61,16 +43,7 @@ export class UsersController {
     @Roles(UserRole.SYS_ADMIN)
     async create(@Body() createUserDto: CreateUserDto): Promise<UserResponseDto> {
         const user = await this.usersService.create(createUserDto);
-        return {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            is_first_login: user.isFirstLogin,
-            contact_info: user.contactInfo,
-            identity_last6: user.identityLast6,
-            managed_building: user.managedBuilding,
-            managed_floor: user.managedFloor,
-        };
+        return UserResponseDto.fromEntity(user);
     }
 
     @Put(':id')
@@ -80,16 +53,7 @@ export class UsersController {
         @Body() updateUserDto: UpdateUserDto,
     ): Promise<UserResponseDto> {
         const user = await this.usersService.update(+id, updateUserDto);
-        return {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            is_first_login: user.isFirstLogin,
-            contact_info: user.contactInfo,
-            identity_last6: user.identityLast6,
-            managed_building: user.managedBuilding,
-            managed_floor: user.managedFloor,
-        };
+        return UserResponseDto.fromEntity(user);
     }
 
     @Post(':id/reset-password-identity')

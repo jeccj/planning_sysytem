@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '../../api/axios'
 import { ElMessage } from 'element-plus'
 import { Message, Edit } from '@element-plus/icons-vue'
+import { getRoleLabel, getRoleType } from '../../utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,25 +50,7 @@ watch(
     { immediate: true }
 )
 
-const getRoleLabel = (role) => {
-    const map = {
-        'student_teacher': '师生',
-        'floor_admin': '楼层管理员',
-        'venue_admin': '场馆管理员',
-        'sys_admin': '系统管理员'
-    }
-    return map[role] || role
-}
 
-const getRoleType = (role) => {
-    const map = {
-        'student_teacher': '',
-        'floor_admin': 'warning',
-        'venue_admin': 'warning',
-        'sys_admin': 'danger'
-    }
-    return map[role] || ''
-}
 
 // 编辑用户
 const showModal = ref(false)

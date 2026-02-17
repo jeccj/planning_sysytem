@@ -21,15 +21,7 @@ export class NotificationsController {
         @Query('limit') limit: string = '100',
     ): Promise<NotificationResponseDto[]> {
         const notifications = await this.notificationsService.findAllForUser(user.id, +skip, +limit);
-        return notifications.map(n => ({
-            id: n.id,
-            user_id: n.userId,
-            title: n.title,
-            content: n.content,
-            is_read: n.isRead,
-            created_at: n.createdAt,
-            notification_type: n.notificationType,
-        }));
+        return notifications.map(NotificationResponseDto.fromEntity);
     }
 
     @Get('unread-count')
@@ -40,17 +32,8 @@ export class NotificationsController {
 
     @Post()
     async create(@Body() createNotificationDto: CreateNotificationDto): Promise<NotificationResponseDto> {
-        // Note: Usually notifications are created by system events (venue change, etc), but API allows manual creation too
         const n = await this.notificationsService.create(createNotificationDto);
-        return {
-            id: n.id,
-            user_id: n.userId,
-            title: n.title,
-            content: n.content,
-            is_read: n.isRead,
-            created_at: n.createdAt,
-            notification_type: n.notificationType,
-        };
+        return NotificationResponseDto.fromEntity(n);
     }
 
     @Post('send')
@@ -58,15 +41,7 @@ export class NotificationsController {
     @Roles(UserRole.SYS_ADMIN)
     async send(@Body() createNotificationDto: CreateNotificationDto): Promise<NotificationResponseDto> {
         const n = await this.notificationsService.create(createNotificationDto);
-        return {
-            id: n.id,
-            user_id: n.userId,
-            title: n.title,
-            content: n.content,
-            is_read: n.isRead,
-            created_at: n.createdAt,
-            notification_type: n.notificationType,
-        };
+        return NotificationResponseDto.fromEntity(n);
     }
 
     @Put(':id/read')
@@ -76,15 +51,7 @@ export class NotificationsController {
     ): Promise<NotificationResponseDto> {
         try {
             const n = await this.notificationsService.markAsRead(+id, user.id);
-            return {
-                id: n.id,
-                user_id: n.userId,
-                title: n.title,
-                content: n.content,
-                is_read: n.isRead,
-                created_at: n.createdAt,
-                notification_type: n.notificationType,
-            };
+            return NotificationResponseDto.fromEntity(n);
         } catch (error) {
             throw new HttpException('Notification not found', HttpStatus.NOT_FOUND);
         }

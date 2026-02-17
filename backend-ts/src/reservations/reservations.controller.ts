@@ -37,25 +37,7 @@ export class ReservationsController {
                 }
                 : (user.role === UserRole.STUDENT_TEACHER ? { userId: user.id } : undefined));
         const reservations = await this.reservationsService.findAll(+skip, +limit, filter);
-        return reservations.map(res => ({
-            id: res.id,
-            user_id: res.userId,
-            venue_id: res.venueId,
-            start_time: res.startTime,
-            end_time: res.endTime,
-            activity_name: res.activityName,
-            organizer: res.organizer,
-            organizer_unit: res.organizerUnit,
-            contact_name: res.contactName,
-            contact_phone: res.contactPhone,
-            attendees_count: res.attendeesCount,
-            proposal_content: res.proposalContent,
-            proposal_url: res.proposalUrl,
-            status: res.status,
-            rejection_reason: res.rejectionReason,
-            ai_risk_score: res.aiRiskScore,
-            ai_audit_comment: res.aiAuditComment,
-        }));
+        return reservations.map(ReservationResponseDto.fromEntity);
     }
 
     @Post('batch')
@@ -98,25 +80,7 @@ export class ReservationsController {
         }
 
         const res = await this.reservationsService.create(createReservationDto, user.id, proposalUrl);
-        return {
-            id: res.id,
-            user_id: res.userId,
-            venue_id: res.venueId,
-            start_time: res.startTime,
-            end_time: res.endTime,
-            activity_name: res.activityName,
-            organizer: res.organizer,
-            organizer_unit: res.organizerUnit,
-            contact_name: res.contactName,
-            contact_phone: res.contactPhone,
-            attendees_count: res.attendeesCount,
-            proposal_content: res.proposalContent,
-            proposal_url: res.proposalUrl,
-            status: res.status,
-            rejection_reason: res.rejectionReason,
-            ai_risk_score: res.aiRiskScore,
-            ai_audit_comment: res.aiAuditComment,
-        };
+        return ReservationResponseDto.fromEntity(res);
     }
 
     @Put(':id')
@@ -133,25 +97,7 @@ export class ReservationsController {
                 managedBuilding: user.managedBuilding,
                 managedFloor: user.managedFloor,
             });
-            return {
-                id: res.id,
-                user_id: res.userId,
-                venue_id: res.venueId,
-                start_time: res.startTime,
-                end_time: res.endTime,
-                activity_name: res.activityName,
-                organizer: res.organizer,
-                organizer_unit: res.organizerUnit,
-                contact_name: res.contactName,
-                contact_phone: res.contactPhone,
-                attendees_count: res.attendeesCount,
-                proposal_content: res.proposalContent,
-                proposal_url: res.proposalUrl,
-                status: res.status,
-                rejection_reason: res.rejectionReason,
-                ai_risk_score: res.aiRiskScore,
-                ai_audit_comment: res.aiAuditComment,
-            };
+            return ReservationResponseDto.fromEntity(res);
         } catch (error) {
             if (error instanceof HttpException) {
                 throw error;

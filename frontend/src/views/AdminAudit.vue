@@ -2,11 +2,12 @@
 import { ref, onMounted, computed } from 'vue'
 import api from '../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatDateTime, getStatusLabel, getStatusType, isUserDismiss } from '../utils/formatters'
 
 const reservations = ref([])
 const filterStatus = ref('')
 const keyword = ref('')
-const isUserDismiss = (error) => error === 'cancel' || error === 'close'
+
 
 const fetchReservations = async () => {
     try {
@@ -141,32 +142,9 @@ const getRiskParams = (score) => {
     return { type: 'success', label: '低风险' }
 }
 
-const getStatusType = (status) => {
-    const map = {
-        'pending': 'warning',
-        'approved': 'success',
-        'rejected': 'danger',
-        'canceled': 'info',
-        'used': ''
-    }
-    return map[status] || 'info'
-}
 
-const getStatusLabel = (status) => {
-    const map = {
-        'pending': '待审核',
-        'approved': '已通过',
-        'rejected': '已驳回',
-        'canceled': '已取消',
-        'used': '已使用'
-    }
-    return map[status] || status
-}
 
-const formatDateTime = (value) => {
-    if (!value) return '-'
-    return new Date(value).toLocaleString('zh-CN')
-}
+
 </script>
 
 <template>

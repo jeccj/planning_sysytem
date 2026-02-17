@@ -7,6 +7,7 @@ import api from '../../api/axios'
 import { ElMessage } from 'element-plus'
 import { ArrowRight, Filter, View, Location, Clock, DataAnalysis } from '@element-plus/icons-vue'
 import VenueCard from '../../components/VenueCard.vue'
+import { formatTime, getNoticePreview, getVenueBuildingName, isUserDismiss } from '../../utils/formatters'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -44,13 +45,7 @@ const createEmptyBuildingAvailability = () => ({
     classrooms: []
 })
 
-const getVenueBuildingName = (venue) => {
-    const explicit = (venue?.building_name || venue?.buildingName || '').toString().trim()
-    if (explicit) return explicit
-    const location = (venue?.location || '').toString().trim()
-    if (!location) return '未分配楼栋'
-    return location.split(/\s+/)[0] || '未分配楼栋'
-}
+
 
 const buildBuildingAvailabilityFromVenues = (venues, buildingName = selectedBuildingForBoard.value) => {
     const classrooms = (Array.isArray(venues) ? venues : []).filter((item) => classroomTypeSet.has(item?.type))
@@ -911,15 +906,7 @@ const fetchLatestAnnouncement = async () => {
     }
 }
 
-const formatTime = (value) => {
-    if (!value) return ''
-    return new Date(value).toLocaleString()
-}
 
-const getNoticePreview = (text) => {
-    if (!text) return ''
-    return text.length > 80 ? `${text.slice(0, 80)}...` : text
-}
 
 const goToAnnouncements = () => {
     router.push('/announcements')

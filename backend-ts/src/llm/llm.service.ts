@@ -24,16 +24,24 @@ export interface AuditResult {
 @Injectable()
 export class LlmService {
     private client: GoogleGenerativeAI | null;
-    private openaiClient: any | null; // Placeholder for OpenAI/DeepSeek client
-    private modelId = 'gemini-2.0-flash-lite'; // Default
-    private provider = 'gemini'; // Default
+    private openaiClient: any | null;
+    private modelId = 'gemini-2.0-flash-lite';
+    private provider = 'gemini';
+
+    // 配置缓存：避免每次请求都查数据库
+    private configCachedAt = 0;
+    private readonly CONFIG_TTL_MS = 60_000; // 60 秒缓存
 
     constructor(
         private configService: SystemConfigService
     ) { }
 
     private async initClient() {
-        // Fetch config from DB
+        // 缓存未过期则跳过重新初始化
+        if (Date.now() - this.configCachedAt < this.CONFIG_TTL_MS && (this.client || this.openaiClient)) {
+            return;
+        }
+
         this.provider = await this.configService.findByKey('llm_provider') || 'gemini';
         const apiKey = await this.configService.findByKey('llm_api_key') || process.env.GEMINI_API_KEY;
         const baseUrl = await this.configService.findByKey('llm_base_url');
@@ -45,18 +53,60 @@ export class LlmService {
             console.log('[LLM Service] WARNING: No API Key found, using mock mode.');
             this.client = null;
             this.openaiClient = null;
-            return;
-        }
-
-        if (this.provider === 'gemini') {
+        } else if (this.provider === 'gemini') {
             this.client = new GoogleGenerativeAI(apiKey);
             this.openaiClient = null;
-        } else if (this.provider === 'deepseek' || this.provider === 'custom') {
-            // lazy load openai to avoid dependency if not needed, or just standard fetch
-            // using standard fetch for simplicity and compatibility
+        } else {
             this.openaiClient = { apiKey, baseUrl: baseUrl || 'https://api.deepseek.com' };
             this.client = null;
         }
+
+        this.configCachedAt = Date.now();
+    }
+
+    /** 统一的 LLM 调用方法，消除 parseIntent / auditProposal 中的重复代码 */
+    private async callLlm(prompt: string): Promise<string> {
+        if (this.provider === 'gemini' && this.client) {
+            const model = this.client.getGenerativeModel({ model: this.modelId });
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            return response.text();
+        }
+
+        if ((this.provider === 'deepseek' || this.provider === 'custom') && this.openaiClient) {
+            const response = await fetch(`${this.openaiClient.baseUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.openaiClient.apiKey}`,
+                },
+                body: JSON.stringify({
+                    model: this.modelId,
+                    messages: [
+                        { role: 'system', content: 'You are a JSON-only response bot.' },
+                        { role: 'user', content: prompt },
+                    ],
+                    temperature: 0.1,
+                }),
+            });
+            const data = await response.json();
+            if (data.choices?.length > 0) {
+                return data.choices[0].message.content;
+            }
+            throw new Error('DeepSeek/Custom API invalid response: ' + JSON.stringify(data));
+        }
+
+        throw new Error('No valid client initialized');
+    }
+
+    /** 从 LLM 原始响应中提取 JSON 对象 */
+    private extractJson<T>(rawText: string): T {
+        const cleaned = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const jsonMatch = cleaned.match(/\{.*\}/s);
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+        }
+        return JSON.parse(cleaned);
     }
 
     private extractMockFacilities(queryText: string): string[] {
@@ -98,49 +148,9 @@ Return ONLY a valid JSON object. No markdown.
 Example format: {"date": "2023-10-27", "time_range": ["09:00", "11:00"], "capacity": 30, "facilities": ["投影仪", "电脑"], "keywords": ["教师"], "activity_name": "Class Meeting", "organizer_unit": "CS Dept", "contact_name": "John", "contact_phone": "12345678901"}`;
 
         try {
-            let rawText = '';
-
-            if (this.provider === 'gemini' && this.client) {
-                const model = this.client.getGenerativeModel({ model: this.modelId });
-                const result = await model.generateContent(prompt);
-                const response = await result.response;
-                rawText = response.text();
-            } else if ((this.provider === 'deepseek' || this.provider === 'custom') && this.openaiClient) {
-                // Use fetch for OpenAI compatible API
-                const response = await fetch(`${this.openaiClient.baseUrl}/v1/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.openaiClient.apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: this.modelId,
-                        messages: [
-                            { role: 'system', content: 'You are a JSON-only response bot.' },
-                            { role: 'user', content: prompt }
-                        ],
-                        temperature: 0.1
-                    })
-                });
-                const data = await response.json();
-                if (data.choices && data.choices.length > 0) {
-                    rawText = data.choices[0].message.content;
-                } else {
-                    throw new Error('DeepSeek/Custom API invalid response: ' + JSON.stringify(data));
-                }
-            } else {
-                throw new Error('No valid client initialized');
-            }
-
+            const rawText = await this.callLlm(prompt);
             console.log(`[LLM Service] Raw Response (${this.provider}): ${rawText}`);
-
-            // Robust JSON extraction
-            const jsonMatch = rawText.match(/\{.*\}/s);
-            if (jsonMatch) {
-                return JSON.parse(jsonMatch[0]);
-            } else {
-                throw new Error('No valid JSON found in response');
-            }
+            return this.extractJson<IntentResult>(rawText);
 
         } catch (error) {
             console.log(`[LLM Service] Error (${this.provider}): ${error}`);
@@ -247,40 +257,8 @@ Criteria:
 Do not include markdown code blocks.`;
 
         try {
-            let rawText = '';
-            if (this.provider === 'gemini' && this.client) {
-                const model = this.client.getGenerativeModel({ model: this.modelId });
-                const result = await model.generateContent(prompt);
-                const response = await result.response;
-                rawText = response.text();
-            } else if ((this.provider === 'deepseek' || this.provider === 'custom') && this.openaiClient) {
-                const response = await fetch(`${this.openaiClient.baseUrl}/v1/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${this.openaiClient.apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: this.modelId,
-                        messages: [
-                            { role: 'system', content: 'You are a JSON-only bot.' },
-                            { role: 'user', content: prompt }
-                        ]
-                    })
-                });
-                const data = await response.json();
-                if (data.choices && data.choices.length > 0) {
-                    rawText = data.choices[0].message.content;
-                } else {
-                    throw new Error('DeepSeek/Custom API invalid response');
-                }
-            } else {
-                throw new Error('No valid client initialized');
-            }
-
-            const cleanText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-            const jsonMatch = cleanText.match(/\{.*\}/s); // Robust extraction
-            return jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(cleanText);
+            const rawText = await this.callLlm(prompt);
+            return this.extractJson<AuditResult>(rawText);
 
         } catch (error) {
             console.log(`[LLM Service] Error (${this.provider}): ${error}`);

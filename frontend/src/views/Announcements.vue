@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import api from '../api/axios'
 import { ElMessage } from 'element-plus'
+import { formatTime } from '../utils/formatters'
 
 const announcements = ref([])
 const loading = ref(false)
@@ -20,10 +21,6 @@ const fetchAnnouncements = async () => {
 
 onMounted(() => fetchAnnouncements())
 
-const formatTime = (value) => {
-  if (!value) return ''
-  return new Date(value).toLocaleString()
-}
 </script>
 
 <template>

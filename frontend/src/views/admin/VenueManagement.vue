@@ -5,6 +5,7 @@ import { ArrowDown } from '@element-plus/icons-vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '../../stores/auth'
+import { isUserDismiss } from '../../utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,7 +36,6 @@ const form = ref({
 })
 
 const facilitiesOptions = ['投影仪', '音响设备', '白板', '电脑', '舞台']
-const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 const role = computed(() => authStore.user?.role || '')
 const isSysAdmin = computed(() => role.value === 'sys_admin')
 const managedBuilding = computed(() => (authStore.user?.managed_building || authStore.user?.managedBuilding || '').toString().trim())

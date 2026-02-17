@@ -24,15 +24,7 @@ export class AnnouncementsController {
             managedBuilding: user.managedBuilding,
             managedFloor: user.managedFloor,
         });
-        return announcements.map(a => ({
-            id: a.id,
-            title: a.title,
-            content: a.content,
-            publish_time: a.publishTime,
-            target_role: a.targetRole,
-            scope_building: a.scopeBuilding,
-            scope_floor: a.scopeFloor,
-        }));
+        return announcements.map(AnnouncementResponseDto.fromEntity);
     }
 
     @Get('latest')
@@ -45,15 +37,7 @@ export class AnnouncementsController {
         if (!item) {
             throw new HttpException('Announcement not found', HttpStatus.NOT_FOUND);
         }
-        return {
-            id: item.id,
-            title: item.title,
-            content: item.content,
-            publish_time: item.publishTime,
-            target_role: item.targetRole,
-            scope_building: item.scopeBuilding,
-            scope_floor: item.scopeFloor,
-        };
+        return AnnouncementResponseDto.fromEntity(item);
     }
 
     @Post()
@@ -61,15 +45,7 @@ export class AnnouncementsController {
     @Roles(UserRole.SYS_ADMIN)
     async create(@Body() createAnnouncementDto: CreateAnnouncementDto): Promise<AnnouncementResponseDto> {
         const a = await this.announcementsService.create(createAnnouncementDto);
-        return {
-            id: a.id,
-            title: a.title,
-            content: a.content,
-            publish_time: a.publishTime,
-            target_role: a.targetRole,
-            scope_building: a.scopeBuilding,
-            scope_floor: a.scopeFloor,
-        };
+        return AnnouncementResponseDto.fromEntity(a);
     }
 
     @Put(':id')
@@ -81,15 +57,7 @@ export class AnnouncementsController {
     ): Promise<AnnouncementResponseDto> {
         try {
             const a = await this.announcementsService.update(+id, updateAnnouncementDto);
-            return {
-                id: a.id,
-                title: a.title,
-                content: a.content,
-                publish_time: a.publishTime,
-                target_role: a.targetRole,
-                scope_building: a.scopeBuilding,
-                scope_floor: a.scopeFloor,
-            };
+            return AnnouncementResponseDto.fromEntity(a);
         } catch (error) {
             throw new HttpException('Announcement not found', HttpStatus.NOT_FOUND);
         }

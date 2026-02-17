@@ -1,13 +1,13 @@
 venv/
 
 backend/.env
-
+backend/routers/__pycache__/
 backend/__pycache__/
 
 backend/routers/__pycache__/node_modules/
 dist/
 .DS_Store
-
+.vs/
 # 忽略所有层级下的 node_modules
 node_modules/
 # 忽略编译产物

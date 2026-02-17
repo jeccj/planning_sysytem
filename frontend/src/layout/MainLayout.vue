@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import api from '../api/axios'
 import { ElMessage } from 'element-plus'
+import { formatTime } from '../utils/formatters'
 import {
   Menu as IconMenu,
   Setting,
@@ -262,11 +263,6 @@ const handleNoticeConfirm = () => {
     if (latestAnnouncement.value?.id) {
         setSeenAnnouncementId(latestAnnouncement.value.id)
     }
-}
-
-const formatTime = (value) => {
-    if (!value) return ''
-    return new Date(value).toLocaleString()
 }
 
 const fetchLatestAnnouncement = async () => {

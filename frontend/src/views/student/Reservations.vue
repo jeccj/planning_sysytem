@@ -3,9 +3,9 @@ import { ref, onMounted } from 'vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
+import { formatDateTime, getStatusLabel, getStatusType, isUserDismiss } from '../../utils/formatters'
 
 const myReservations = ref([])
-const isUserDismiss = (error) => error === 'cancel' || error === 'close'
 
 const fetchMyReservations = async () => {
     try {
@@ -18,27 +18,7 @@ onMounted(() => {
     fetchMyReservations()
 })
 
-const getStatusLabel = (status) => {
-    const map = {
-        'pending': '待审核',
-        'approved': '已通过',
-        'rejected': '已驳回',
-        'canceled': '已取消',
-        'used': '已使用'
-    }
-    return map[status] || status
-}
 
-const getStatusType = (status) => {
-    const map = {
-        'pending': 'warning',
-        'approved': 'success',
-        'rejected': 'danger',
-        'canceled': 'info',
-        'used': ''
-    }
-    return map[status] || 'info'
-}
 
 // 判断是否可以取消预约
 const canCancel = (reservation) => {
@@ -87,16 +67,7 @@ const openDetail = (reservation) => {
     showDetailDialog.value = true
 }
 
-const formatDateTime = (value) => {
-    if (!value) return ''
-    return new Date(value).toLocaleString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-    })
-}
+
 </script>
 
 <template>

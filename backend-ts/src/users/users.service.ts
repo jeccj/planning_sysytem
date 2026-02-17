@@ -1,13 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
-import * as bcrypt from 'bcrypt';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { NotFoundException } from '@nestjs/common';
-import { BadRequestException } from '@nestjs/common';
 import { UserRole } from '../common/enums';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {

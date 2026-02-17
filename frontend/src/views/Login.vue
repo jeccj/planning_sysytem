@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/auth'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import api from '../api/axios'
+import { formatTime } from '../utils/formatters'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -169,10 +170,6 @@ const confirmAnnouncement = () => {
   router.push(pendingRedirect.value)
 }
 
-const formatTime = (value) => {
-  if (!value) return ''
-  return new Date(value).toLocaleString()
-}
 
 const openForgotDialog = () => {
   forgotForm.value = {
