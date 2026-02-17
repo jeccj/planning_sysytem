@@ -1312,7 +1312,14 @@ const goToAnnouncements = () => {
     <el-dialog v-model="showVenueDetail" title="场地详情" width="600px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog venue-detail-dialog">
         <div v-if="selectedVenueDetail" class="venue-detail-content">
             <!-- 场地图片 -->
-            <div v-if="selectedVenueDetail.image_url" class="venue-image">
+            <div v-if="selectedVenueDetail.photos && selectedVenueDetail.photos.length > 0" class="venue-image">
+                <el-carousel :height="'200px'" indicator-position="outside" :autoplay="false">
+                    <el-carousel-item v-for="(photo, idx) in selectedVenueDetail.photos" :key="idx">
+                        <el-image :src="photo" fit="cover" style="width: 100%; height: 200px; border-radius: 12px;" />
+                    </el-carousel-item>
+                </el-carousel>
+            </div>
+            <div v-else-if="selectedVenueDetail.image_url" class="venue-image">
                 <el-image :src="selectedVenueDetail.image_url" fit="cover" style="width: 100%; height: 200px; border-radius: 12px;" />
             </div>
             <div v-else class="venue-image-placeholder">

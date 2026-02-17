@@ -134,6 +134,7 @@ export class VenuesService {
             openHours: createVenueDto.open_hours,
             description: createVenueDto.description,
             imageUrl: createVenueDto.image_url,
+            photos: createVenueDto.photos || [],
             adminId,
             location,
             buildingName,
@@ -160,6 +161,9 @@ export class VenuesService {
         venue.openHours = updateVenueDto.open_hours ?? '';
         venue.description = updateVenueDto.description ?? '';
         venue.imageUrl = updateVenueDto.image_url ?? '';
+        if (Object.prototype.hasOwnProperty.call(updateVenueDto, 'photos')) {
+            venue.photos = updateVenueDto.photos || [];
+        }
         if (updateVenueDto.admin_id) {
             venue.adminId = updateVenueDto.admin_id;
         }

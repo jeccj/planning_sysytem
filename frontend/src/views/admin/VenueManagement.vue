@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, Plus, ZoomIn, Delete } from '@element-plus/icons-vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '../../stores/auth'
@@ -36,6 +36,9 @@ const form = ref({
 })
 
 const facilitiesOptions = ['投影仪', '音响设备', '白板', '电脑', '舞台']
+const photoFileList = ref([])
+const previewVisible = ref(false)
+const previewUrl = ref('')
 const role = computed(() => authStore.user?.role || '')
 const isSysAdmin = computed(() => role.value === 'sys_admin')
 const managedBuilding = computed(() => (authStore.user?.managed_building || authStore.user?.managedBuilding || '').toString().trim())
@@ -119,6 +122,7 @@ function openCreate() {
         facilities: [], status: 'available', admin_id: null,
         open_hours: '', description: ''
     }
+    photoFileList.value = []
     showModal.value = true
 }
 
@@ -126,6 +130,10 @@ const openEdit = (venue) => {
     isEdit.value = true
     currentId.value = venue.id
     form.value = { ...venue }
+    photoFileList.value = (venue.photos || []).map((url, idx) => ({
+        name: `photo-${idx}`,
+        url: url
+    }))
     showModal.value = true
 }
 
@@ -143,14 +151,36 @@ const submitForm = async () => {
             location: form.value.location || [form.value.building_name, form.value.floor_label, form.value.room_code].filter(Boolean).join(' ')
         }
         
+        let venueId = currentId.value
         if (isEdit.value) {
             await api.put(`/venues/${currentId.value}`, payload)
-            ElMessage.success("场馆信息更新成功")
         } else {
-            await api.post('/venues/', payload)
-            ElMessage.success("场馆创建成功")
+            const res = await api.post('/venues/', payload)
+            venueId = res.data.id
         }
-        
+
+        // Upload new photo files (those with raw File objects)
+        const newFiles = photoFileList.value.filter(f => f.raw)
+        if (newFiles.length > 0 && venueId) {
+            const formData = new FormData()
+            newFiles.forEach(f => formData.append('photos', f.raw))
+            await api.post(`/venues/${venueId}/photos`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                timeout: 30000
+            })
+        }
+
+        // Delete removed photos (those that existed on server but are no longer in the list)
+        if (isEdit.value) {
+            const existingUrls = (form.value.photos || [])
+            const currentUrls = photoFileList.value.filter(f => !f.raw).map(f => f.url)
+            const removedUrls = existingUrls.filter(url => !currentUrls.includes(url))
+            for (const url of removedUrls) {
+                await api.delete(`/venues/${venueId}/photos`, { data: { url } }).catch(() => {})
+            }
+        }
+
+        ElMessage.success(isEdit.value ? "场馆信息更新成功" : "场馆创建成功")
         showModal.value = false
         fetchVenues()
     } catch (e) {
@@ -386,6 +416,10 @@ const openBuildingDetail = (buildingName) => {
       </template>
       <div class="venue-grid">
         <el-card v-for="venue in searchResultClassrooms" :key="venue.id" shadow="never" class="venue-compact-card app-panel">
+          <div v-if="venue.photos && venue.photos.length > 0" class="venue-photo-strip">
+            <img v-for="(photo, idx) in venue.photos.slice(0, 3)" :key="idx" :src="photo" class="venue-thumb" @click.stop="previewUrl = photo; previewVisible = true" />
+            <span v-if="venue.photos.length > 3" class="venue-thumb-more">+{{ venue.photos.length - 3 }}</span>
+          </div>
           <div class="venue-head">
             <div class="venue-title-wrap">
               <h3>{{ venue.name }}</h3>
@@ -445,6 +479,10 @@ const openBuildingDetail = (buildingName) => {
     >
       <div class="venue-grid">
         <el-card v-for="venue in activeBuildingClassrooms" :key="venue.id" shadow="never" class="venue-compact-card app-panel">
+          <div v-if="venue.photos && venue.photos.length > 0" class="venue-photo-strip">
+            <img v-for="(photo, idx) in venue.photos.slice(0, 3)" :key="idx" :src="photo" class="venue-thumb" @click.stop="previewUrl = photo; previewVisible = true" />
+            <span v-if="venue.photos.length > 3" class="venue-thumb-more">+{{ venue.photos.length - 3 }}</span>
+          </div>
           <div class="venue-head">
             <div class="venue-title-wrap">
               <h3>{{ venue.name }}</h3>
@@ -497,7 +535,7 @@ const openBuildingDetail = (buildingName) => {
     </el-dialog>
 
     <!-- Create/Edit Modal -->
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" :teleported="false" :modal-append-to-body="false" class="glass-dialog venue-edit-dialog">
         <el-form :model="form" label-width="100px">
             <el-row :gutter="20">
               <el-col :span="12">
@@ -580,6 +618,23 @@ const openBuildingDetail = (buildingName) => {
                   :rows="3" 
                   placeholder="场馆详细描述和使用说明" 
                 />
+            </el-form-item>
+
+            <el-form-item label="场馆照片">
+                <el-upload
+                  v-model:file-list="photoFileList"
+                  list-type="picture-card"
+                  :auto-upload="false"
+                  accept="image/*"
+                  :limit="10"
+                  :on-preview="(file) => { previewUrl = file.url; previewVisible = true }"
+                  :on-exceed="() => ElMessage.warning('最多上传 10 张照片')"
+                >
+                  <el-icon><Plus /></el-icon>
+                </el-upload>
+                <el-dialog v-model="previewVisible" title="预览" width="600px" append-to-body>
+                  <img :src="previewUrl" style="width: 100%" alt="预览" />
+                </el-dialog>
             </el-form-item>
 
             <el-form-item label="配套设施">
@@ -725,6 +780,33 @@ html.dark .stat-pill {
     gap: 10px;
 }
 
+.venue-photo-strip {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    overflow: hidden;
+}
+
+.venue-thumb {
+    width: 64px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.venue-thumb:hover {
+    transform: scale(1.08);
+}
+
+.venue-thumb-more {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    font-weight: 600;
+}
+
 .venue-head {
     display: flex;
     justify-content: space-between;
@@ -817,4 +899,5 @@ html.dark .meta-pill {
         font-size: 11px;
     }
 }
+
 </style>

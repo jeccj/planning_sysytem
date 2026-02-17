@@ -42,6 +42,11 @@ export class CreateVenueDto {
     @IsOptional()
     image_url?: string;
 
+    @IsArray()
+    @IsString({ each: true })
+    @IsOptional()
+    photos?: string[];
+
     @IsString()
     @IsOptional()
     open_hours?: string;

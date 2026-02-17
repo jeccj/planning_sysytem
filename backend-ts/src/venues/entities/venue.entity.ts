@@ -41,6 +41,9 @@ export class Venue {
     @Column({ name: 'image_url', nullable: true })
     imageUrl: string;
 
+    @Column({ name: 'photos', type: 'simple-json', nullable: true })
+    photos: string[];
+
     @Column({ name: 'open_hours', nullable: true })
     openHours: string;
 
