@@ -7,10 +7,10 @@ import MainLayout from '../layout/MainLayout.vue'
 const StudentDashboard = () => import('../views/student/Dashboard.vue')
 const AdminDashboard = () => import('../views/admin/Dashboard.vue')
 const VenueManagement = () => import('../views/admin/VenueManagement.vue')
-const AdminAudit = () => import('../views/AdminAudit.vue') // Moving to admin folder later ideally
+const AdminAudit = () => import('../views/admin/AdminAudit.vue')
 const AnnouncementManagement = () => import('../views/admin/AnnouncementManagement.vue')
 const Announcements = () => import('../views/Announcements.vue')
-import SystemSettings from '../views/admin/SystemSettings.vue'
+const SystemSettings = () => import('../views/admin/SystemSettings.vue')
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -114,7 +114,7 @@ router.beforeEach((to, from, next) => {
         }
     }
 
-    if (to.path === '/admin/venues' && ['venue_admin', 'floor_admin'].includes(role) && !hasManagedScope) {
+    if ((to.path === '/admin/venues' || to.path === '/admin/audit') && ['venue_admin', 'floor_admin'].includes(role) && !hasManagedScope) {
         next('/admin/dashboard')
         return
     }

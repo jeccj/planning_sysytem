@@ -30,40 +30,36 @@ export class AnnouncementsService {
             return this.findAll(skip, limit);
         }
 
-        const all = await this.announcementRepository.find({
-            order: { publishTime: 'DESC' },
-            skip,
-            take: limit,
-        });
+        const qb = this.announcementRepository
+            .createQueryBuilder('a')
+            .orderBy('a.publishTime', 'DESC')
+            .skip(skip)
+            .take(limit);
 
         if (role === UserRole.STUDENT_TEACHER) {
-            return all.filter((item) => {
-                const roleHit = item.targetRole === AnnouncementTargetRole.ALL || item.targetRole === AnnouncementTargetRole.STUDENT_TEACHER;
-                return roleHit;
+            qb.where('a.targetRole IN (:...roles)', {
+                roles: [AnnouncementTargetRole.ALL, AnnouncementTargetRole.STUDENT_TEACHER],
             });
-        }
-
-        if (role === UserRole.VENUE_ADMIN || role === UserRole.FLOOR_ADMIN) {
+        } else if (role === UserRole.VENUE_ADMIN || role === UserRole.FLOOR_ADMIN) {
             const managedBuilding = (scope?.managedBuilding || '').trim();
             const managedFloor = (scope?.managedFloor || '').trim();
             if (!managedBuilding && !managedFloor) {
                 return [];
             }
-
-            return all.filter((item) => {
-                if (item.targetRole !== AnnouncementTargetRole.VENUE_ADMIN) {
-                    return false;
-                }
-                const itemBuilding = (item.scopeBuilding || '').trim();
-                const itemFloor = (item.scopeFloor || '').trim();
-
-                const buildingHit = !managedBuilding || itemBuilding === managedBuilding;
-                const floorHit = !managedFloor || itemFloor === managedFloor;
-                return buildingHit && floorHit;
+            qb.where('a.targetRole IN (:...roles)', {
+                roles: [AnnouncementTargetRole.ALL, AnnouncementTargetRole.VENUE_ADMIN],
             });
+            if (managedBuilding) {
+                qb.andWhere('(a.scopeBuilding = :building OR a.scopeBuilding = \'\' OR a.scopeBuilding IS NULL)', { building: managedBuilding });
+            }
+            if (managedFloor) {
+                qb.andWhere('(a.scopeFloor = :floor OR a.scopeFloor = \'\' OR a.scopeFloor IS NULL)', { floor: managedFloor });
+            }
+        } else {
+            return [];
         }
 
-        return [];
+        return qb.getMany();
     }
 
     async findLatestForRole(

@@ -1,7 +1,9 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { LlmService } from '../llm/llm.service';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
 @Controller('nlp')
+@UseGuards(JwtAuthGuard)
 export class NlpController {
     constructor(private readonly llmService: LlmService) { }
 

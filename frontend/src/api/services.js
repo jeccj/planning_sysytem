@@ -68,7 +68,6 @@ export const nlpApi = {
 
 // ========== 系统配置 ==========
 export const systemConfigApi = {
-  get: (key) => api.get(`/system-config/${key}`),
-  set: (key, data) => api.put(`/system-config/${key}`, data),
-  getLlmProvider: () => api.get('/system-config/llm-provider'),
+  getAll: () => api.get('/system-config'),
+  update: (configs) => api.put('/system-config', { configs }),
 }

@@ -123,7 +123,8 @@ const filterForm = ref({
     minCapacity: null,
     facilities: [],
     status: '',
-    location: ''
+    location: '',
+    reservationStatus: ''
 })
 const showFilterPanel = ref(false)
 
@@ -188,6 +189,13 @@ const filteredVenues = computed(() => {
         const keyword = filterForm.value.location.toLowerCase()
         result = result.filter(v => v.location?.toLowerCase().includes(keyword))
     }
+
+    // 按是否已预约筛选
+    if (filterForm.value.reservationStatus === 'reserved') {
+        result = result.filter(v => v.is_reserved === true)
+    } else if (filterForm.value.reservationStatus === 'free') {
+        result = result.filter(v => v.is_reserved !== true)
+    }
     
     return result
 })
@@ -225,7 +233,8 @@ const resetFilters = () => {
         minCapacity: null,
         facilities: [],
         status: '',
-        location: ''
+        location: '',
+        reservationStatus: ''
     }
 }
 
@@ -383,7 +392,7 @@ const handleSearchResults = async (results, query) => {
                 const startStr = rangeMatch[1].toLowerCase()
                 const endStr = rangeMatch[2].toLowerCase()
                 if (endStr.match(/pm|下午/) && !startStr.match(/pm|am|下午|上午/) && startHour < 12) {
-                     if (startHour < endHour || startHour + 12 < endHour) startHour += 12
+                     if (startHour + 12 <= endHour) startHour += 12
                 }
             }
         } 
@@ -478,6 +487,7 @@ const reservationForm = ref({
   organizer_unit: '',
   contact_name: '',
   contact_phone: '',
+  activity_description: '',
   proposal_content: '',
   attendees_count: 10,
   date: '',
@@ -740,6 +750,7 @@ const buildReservationPayload = (startDateTime, endDateTime) => ({
     organizer_unit: reservationForm.value.organizer_unit,
     contact_name: reservationForm.value.contact_name,
     contact_phone: reservationForm.value.contact_phone,
+    activity_description: reservationForm.value.activity_description,
     proposal_content: reservationForm.value.proposal_content,
     attendees_count: Number(reservationForm.value.attendees_count),
     start_time: startDateTime,
@@ -982,7 +993,7 @@ const goToAnnouncements = () => {
                 <SmartSearch @search-complete="handleSearchResults" />
             </div>
             <div v-if="venues.length > 0" class="results-grid">
-                <VenueCard v-for="venue in venues" :key="venue.id" :venue="venue" @book="openBooking" />
+                <VenueCard v-for="venue in venues" :key="venue.id" :venue="venue" @book="openBooking" @view-detail="openVenueDetail" />
             </div>
             <el-empty v-else description="搜索看看，或者在'浏览所有'中挑选" />
         </el-tab-pane>
@@ -1032,6 +1043,12 @@ const goToAnnouncements = () => {
                                  <el-option label="维护中" value="maintenance" />
                              </el-select>
                          </el-form-item>
+                         <el-form-item label="预约状态">
+                             <el-select v-model="filterForm.reservationStatus" placeholder="全部" clearable style="width: 120px;">
+                                 <el-option label="当前已预约" value="reserved" />
+                                 <el-option label="当前空闲" value="free" />
+                             </el-select>
+                         </el-form-item>
                          <el-form-item label="设施要求">
                              <el-checkbox-group v-model="filterForm.facilities">
                                  <el-checkbox v-for="f in facilityOptions" :key="f" :label="f">{{ f }}</el-checkbox>
@@ -1068,10 +1085,9 @@ const goToAnnouncements = () => {
         v-model="showBuildingVenueDialog"
         :title="`${selectedBrowseBuilding} · 场馆列表`"
         width="760px"
-        :teleported="false"
-        :modal-append-to-body="false"
-        :lock-scroll="false"
         class="glass-dialog"
+        align-center
+        append-to-body
     >
         <div class="results-grid">
             <VenueCard
@@ -1089,7 +1105,7 @@ const goToAnnouncements = () => {
     </el-dialog>
 
     <!-- BOOKING DIALOG: PILL STACK SYSTEM -->
-    <el-dialog v-model="showModal" title="预约场馆申请" width="600px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
+    <el-dialog v-model="showModal" title="预约场馆申请" width="600px" class="glass-dialog" align-center append-to-body>
         <el-form :model="reservationForm">
             <div class="form-pill">
                 <el-form-item label="预约模式">
@@ -1108,6 +1124,11 @@ const goToAnnouncements = () => {
             <div class="form-pill">
                 <el-form-item label="主办单位">
                     <el-input v-model="reservationForm.organizer_unit" placeholder="组织/部门名称" />
+                </el-form-item>
+            </div>
+            <div class="form-pill">
+                <el-form-item label="活动简要说明">
+                    <el-input v-model="reservationForm.activity_description" type="textarea" :rows="3" placeholder="简要描述活动内容、目的等" />
                 </el-form-item>
             </div>
             <div class="row-stack">
@@ -1296,7 +1317,7 @@ const goToAnnouncements = () => {
         </template>
     </el-dialog>
 
-    <el-dialog v-model="showProposalModal" title="补充提案详情" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog spatial-modal" align-center>
+    <el-dialog v-model="showProposalModal" title="补充提案详情" width="500px" class="glass-dialog spatial-modal" align-center append-to-body>
         <div class="form-pill pill-stack">
             <el-form-item label="详细说明" label-position="top">
                 <el-input v-model="reservationForm.proposal_content" type="textarea" :rows="8" placeholder="描述流程、物资需求等..." />
@@ -1309,7 +1330,7 @@ const goToAnnouncements = () => {
     </el-dialog>
 
     <!-- 场地详情弹窗 -->
-    <el-dialog v-model="showVenueDetail" title="场地详情" width="600px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog venue-detail-dialog">
+    <el-dialog v-model="showVenueDetail" title="场地详情" width="600px" class="glass-dialog venue-detail-dialog" align-center append-to-body>
         <div v-if="selectedVenueDetail" class="venue-detail-content">
             <!-- 场地图片 -->
             <div v-if="selectedVenueDetail.photos && selectedVenueDetail.photos.length > 0" class="venue-image">
@@ -1748,11 +1769,6 @@ const goToAnnouncements = () => {
     .batch-slot-row {
         grid-template-columns: 1fr;
         gap: 8px;
-    }
-    /* Make dialogs wider on mobile */
-    :deep(.el-dialog) {
-        width: 90% !important;
-        max-width: 400px;
     }
 
     .filter-form {

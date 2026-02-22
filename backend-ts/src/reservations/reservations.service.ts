@@ -30,6 +30,7 @@ type ReservationFilter = {
     userId?: number;
     buildingName?: string;
     floorLabel?: string;
+    status?: ReservationStatus;
 };
 
 type ReservationDraft = {
@@ -43,6 +44,7 @@ type ReservationDraft = {
     contact_phone: string;
     attendees_count: number;
     proposal_content: string;
+    activity_description?: string;
 };
 
 const MIN_DURATION_MINUTES = 30;
@@ -90,6 +92,9 @@ export class ReservationsService {
         }
         if (filter?.floorLabel) {
             qb.andWhere('venue.floorLabel = :floorLabel', { floorLabel: filter.floorLabel });
+        }
+        if (filter?.status) {
+            qb.andWhere('reservation.status = :status', { status: filter.status });
         }
 
         return qb.getMany();
@@ -226,10 +231,10 @@ export class ReservationsService {
 
         this.assertActorCanManageReservation(actor, reservation);
 
+        // State machine: validate legal status transitions
+        this.assertStatusTransitionValid(reservation.status, targetStatus);
+
         if (targetStatus === ReservationStatus.USED) {
-            if (reservation.status !== ReservationStatus.APPROVED) {
-                throw new BadRequestException('Only approved reservations can be marked as used');
-            }
             if (reservation.endTime > now) {
                 throw new BadRequestException('Reservation has not ended yet');
             }
@@ -245,26 +250,6 @@ export class ReservationsService {
     async remove(id: number): Promise<void> {
         await this.slotRepository.delete({ reservationId: id });
         await this.reservationRepository.delete(id);
-    }
-
-    async reserveBlockingSlotsForReservation(reservationId: number): Promise<void> {
-        const reservation = await this.reservationRepository.findOne({ where: { id: reservationId } });
-        if (!reservation) {
-            throw new NotFoundException('Reservation not found');
-        }
-
-        const queryRunner = this.dataSource.createQueryRunner();
-        await queryRunner.connect();
-        await queryRunner.startTransaction();
-        try {
-            await this.upsertBlockingSlots(queryRunner.manager, reservation);
-            await queryRunner.commitTransaction();
-        } catch (error) {
-            await queryRunner.rollbackTransaction();
-            throw error;
-        } finally {
-            await queryRunner.release();
-        }
     }
 
     private async createPendingReservation(
@@ -314,6 +299,7 @@ export class ReservationsService {
             contactPhone: draft.contact_phone,
             attendeesCount: draft.attendees_count,
             proposalContent: draft.proposal_content,
+            activityDescription: draft.activity_description,
             proposalUrl: proposalUrl,
             status: ReservationStatus.PENDING,
         });
@@ -423,9 +409,31 @@ export class ReservationsService {
         return overlaps.find((item) => item.id !== excludeId) || null;
     }
 
+    private static ALLOWED_STATUS_TRANSITIONS: Record<string, ReservationStatus[]> = {
+        [ReservationStatus.PENDING]: [ReservationStatus.APPROVED, ReservationStatus.REJECTED, ReservationStatus.CANCELED],
+        [ReservationStatus.APPROVED]: [ReservationStatus.CANCELED, ReservationStatus.USED, ReservationStatus.REJECTED],
+        // Terminal states: no further transitions allowed
+        [ReservationStatus.REJECTED]: [],
+        [ReservationStatus.CANCELED]: [],
+        [ReservationStatus.USED]: [],
+        [ReservationStatus.MAINTENANCE]: [ReservationStatus.CANCELED],
+    };
+
+    private assertStatusTransitionValid(currentStatus: ReservationStatus, targetStatus: ReservationStatus) {
+        const allowed = ReservationsService.ALLOWED_STATUS_TRANSITIONS[currentStatus];
+        if (!allowed || !allowed.includes(targetStatus)) {
+            throw new BadRequestException(
+                `Cannot transition from '${currentStatus}' to '${targetStatus}'`,
+            );
+        }
+    }
+
     private assertTimeRangeValid(start: Date, end: Date) {
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
             throw new BadRequestException('Invalid start_time or end_time');
+        }
+        if (start <= new Date()) {
+            throw new BadRequestException('start_time must be in the future');
         }
         if (end <= start) {
             throw new BadRequestException('end_time must be after start_time');
@@ -437,6 +445,11 @@ export class ReservationsService {
         if (durationMinutes > MAX_DURATION_MINUTES) {
             throw new BadRequestException(`Reservation duration must be less than ${MAX_DURATION_MINUTES / 60} hours`);
         }
+    }
+
+    /** Public scope-check wrapper for use in controller */
+    assertActorScope(actor: ReservationActor, reservation: Reservation) {
+        this.assertActorCanManageReservation(actor, reservation);
     }
 
     private assertActorCanManageReservation(actor: ReservationActor, reservation: Reservation) {
@@ -568,6 +581,7 @@ export class ReservationsService {
             contact_phone: source.contact_phone,
             attendees_count: source.attendees_count,
             proposal_content: source.proposal_content,
+            activity_description: source.activity_description,
         };
     }
 

@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsInt, IsOptional, IsDateString, Matches } from 'class-validator';
+import { IsString, IsNotEmpty, IsInt, IsOptional, IsDateString, Matches, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateReservationDto {
@@ -39,10 +39,15 @@ export class CreateReservationDto {
 
     @Type(() => Number)
     @IsInt()
+    @Min(1)
     @IsNotEmpty()
     attendees_count: number;
 
     @IsString()
     @IsNotEmpty()
     proposal_content: string;
+
+    @IsString()
+    @IsOptional()
+    activity_description?: string;
 }

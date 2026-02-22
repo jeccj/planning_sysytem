@@ -12,6 +12,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../common/enums';
+import { ReservationStatus } from '../common/enums';
 import { CreateBatchReservationDto, CreateRecurringReservationDto } from './dto/create-recurring-reservation.dto';
 
 @Controller('reservations')
@@ -24,8 +25,9 @@ export class ReservationsController {
         @CurrentUser() user: User,
         @Query('skip') skip: string = '0',
         @Query('limit') limit: string = '100',
+        @Query('status') status?: string,
     ): Promise<ReservationResponseDto[]> {
-        const filter = user.role === UserRole.VENUE_ADMIN
+        const filter: Record<string, any> = user.role === UserRole.VENUE_ADMIN
             ? {
                 buildingName: (user.managedBuilding || '').trim() || (((user.managedFloor || '').trim()) ? undefined : '__NO_SCOPE__'),
                 floorLabel: (user.managedFloor || '').trim() || undefined,
@@ -35,7 +37,11 @@ export class ReservationsController {
                     buildingName: (user.managedBuilding || '').trim() || (((user.managedFloor || '').trim()) ? undefined : '__NO_SCOPE__'),
                     floorLabel: (user.managedFloor || '').trim() || undefined,
                 }
-                : (user.role === UserRole.STUDENT_TEACHER ? { userId: user.id } : undefined));
+                : (user.role === UserRole.STUDENT_TEACHER ? { userId: user.id } : {}));
+        // Add status filter if provided
+        if (status && Object.values(ReservationStatus).includes(status as ReservationStatus)) {
+            filter.status = status as ReservationStatus;
+        }
         const reservations = await this.reservationsService.findAll(+skip, +limit, filter);
         return reservations.map(ReservationResponseDto.fromEntity);
     }
@@ -67,7 +73,15 @@ export class ReservationsController {
                 const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
                 cb(null, `${randomName}${extname(file.originalname)}`);
             }
-        })
+        }),
+        fileFilter: (_req, file, cb) => {
+            const allowed = /\.(pdf|doc|docx|ppt|pptx|xls|xlsx|txt|png|jpg|jpeg)$/i;
+            if (!allowed.test(file.originalname)) {
+                return cb(new (require('@nestjs/common').HttpException)('不支持的文件类型', 400), false);
+            }
+            cb(null, true);
+        },
+        limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
     }))
     async create(
         @CurrentUser() user: User,
@@ -109,7 +123,21 @@ export class ReservationsController {
     @Delete(':id')
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
-    async remove(@Param('id') id: string): Promise<void> {
+    async remove(
+        @CurrentUser() user: User,
+        @Param('id') id: string,
+    ): Promise<void> {
+        const reservation = await this.reservationsService.findOne(+id);
+        if (!reservation) {
+            throw new HttpException('Reservation not found', HttpStatus.NOT_FOUND);
+        }
+        // Scope check for non-sys-admin
+        if (user.role !== UserRole.SYS_ADMIN) {
+            this.reservationsService.assertActorScope(
+                { id: user.id, role: user.role, managedBuilding: user.managedBuilding, managedFloor: user.managedFloor },
+                reservation,
+            );
+        }
         await this.reservationsService.remove(+id);
     }
 }

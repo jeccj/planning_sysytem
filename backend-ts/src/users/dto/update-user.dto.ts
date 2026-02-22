@@ -21,7 +21,7 @@ export class UpdateUserDto {
     @IsString()
     @IsOptional()
     @Length(6, 6)
-    @Matches(/^\d{6}$/)
+    @Matches(/^[\dXx]{6}$/)
     identity_last6?: string;
 
     @IsString()

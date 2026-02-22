@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, MoreThan, In } from 'typeorm';
 import { Venue } from './entities/venue.entity';
 import { CreateVenueDto } from './dto/create-venue.dto';
+import { UpdateVenueDto } from './dto/update-venue.dto';
 import { Reservation } from '../reservations/entities/reservation.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { VenueStatus, ReservationStatus, UserRole } from '../common/enums';
@@ -145,7 +146,7 @@ export class VenuesService {
         return this.venueRepository.save(venue);
     }
 
-    async update(id: number, updateVenueDto: CreateVenueDto): Promise<Venue> {
+    async update(id: number, updateVenueDto: UpdateVenueDto): Promise<Venue> {
         const venue = await this.findOne(id);
         if (!venue) {
             throw new Error('Venue not found');
@@ -153,18 +154,18 @@ export class VenuesService {
 
         const oldStatus = venue.status;
 
-        // Update fields
-        venue.name = updateVenueDto.name;
-        venue.type = updateVenueDto.type;
-        venue.capacity = updateVenueDto.capacity;
-        venue.status = updateVenueDto.status || venue.status;
-        venue.openHours = updateVenueDto.open_hours ?? '';
-        venue.description = updateVenueDto.description ?? '';
-        venue.imageUrl = updateVenueDto.image_url ?? '';
+        // Update fields — only set if provided
+        if (updateVenueDto.name !== undefined) venue.name = updateVenueDto.name;
+        if (updateVenueDto.type !== undefined) venue.type = updateVenueDto.type;
+        if (updateVenueDto.capacity !== undefined) venue.capacity = updateVenueDto.capacity;
+        if (updateVenueDto.status !== undefined) venue.status = updateVenueDto.status;
+        if (updateVenueDto.open_hours !== undefined) venue.openHours = updateVenueDto.open_hours;
+        if (updateVenueDto.description !== undefined) venue.description = updateVenueDto.description;
+        if (updateVenueDto.image_url !== undefined) venue.imageUrl = updateVenueDto.image_url;
         if (Object.prototype.hasOwnProperty.call(updateVenueDto, 'photos')) {
             venue.photos = updateVenueDto.photos || [];
         }
-        if (updateVenueDto.admin_id) {
+        if (updateVenueDto.admin_id !== undefined) {
             venue.adminId = updateVenueDto.admin_id;
         }
 
@@ -197,6 +198,21 @@ export class VenuesService {
             throw new Error('Venue not found');
         }
         return this.venueRepository.remove(venue);
+    }
+
+    async getOccupiedVenueIds(venueIds: number[]): Promise<Set<number>> {
+        if (venueIds.length === 0) return new Set();
+        const now = new Date();
+        const activeReservations = await this.reservationRepository.find({
+            where: {
+                venueId: In(venueIds),
+                status: In([ReservationStatus.APPROVED, ReservationStatus.MAINTENANCE]),
+                startTime: LessThan(now),
+                endTime: MoreThan(now),
+            },
+            select: ['venueId'],
+        });
+        return new Set(activeReservations.map(r => r.venueId));
     }
 
     private async notifyMaintenance(venueId: number, venueName: string) {
@@ -275,7 +291,7 @@ export class VenuesService {
         const activeReservations = await this.reservationRepository.find({
             where: {
                 venueId: In(venueIds),
-                status: ReservationStatus.APPROVED,
+                status: In([ReservationStatus.APPROVED, ReservationStatus.MAINTENANCE]),
                 startTime: LessThan(now),
                 endTime: MoreThan(now),
             },
@@ -392,7 +408,7 @@ export class VenuesService {
         const active = await this.reservationRepository.find({
             where: {
                 venueId: In(classrooms.map((item) => item.id)),
-                status: ReservationStatus.APPROVED,
+                status: In([ReservationStatus.APPROVED, ReservationStatus.MAINTENANCE]),
                 startTime: LessThan(now),
                 endTime: MoreThan(now),
             },
@@ -565,18 +581,48 @@ export class VenuesService {
         try {
             const reservationRepo = queryRunner.manager.getRepository(Reservation);
             const slotRepo = queryRunner.manager.getRepository(ReservationSlot);
+            const notificationRepo = queryRunner.manager.getRepository(Notification);
 
-            const overlap = await reservationRepo.findOne({
+            // Find overlapping approved/pending reservations and cancel them
+            const overlapping = await reservationRepo.find({
                 where: {
                     venueId,
-                    status: In([ReservationStatus.APPROVED, ReservationStatus.MAINTENANCE]),
+                    status: In([ReservationStatus.APPROVED, ReservationStatus.PENDING]),
                     startTime: LessThan(end),
                     endTime: MoreThan(start),
                 },
             });
 
-            if (overlap) {
-                throw new Error('Time slot conflicts with existing reservation or maintenance');
+            // Check if there's an existing maintenance in this slot
+            const existingMaintenance = await reservationRepo.findOne({
+                where: {
+                    venueId,
+                    status: ReservationStatus.MAINTENANCE,
+                    startTime: LessThan(end),
+                    endTime: MoreThan(start),
+                },
+            });
+            if (existingMaintenance) {
+                throw new Error('Time slot conflicts with existing maintenance window');
+            }
+
+            // Cancel overlapping reservations and notify users
+            for (const reservation of overlapping) {
+                reservation.status = ReservationStatus.CANCELED;
+                reservation.rejectionReason = `场地维护：${reason}`;
+                await reservationRepo.save(reservation);
+
+                // Delete their slots
+                await slotRepo.delete({ reservationId: reservation.id });
+
+                // Notify the user
+                const notification = notificationRepo.create({
+                    userId: reservation.userId,
+                    title: '预约已取消 - 场地维护',
+                    content: `您在"${venue.name}"的预约"${reservation.activityName}"（${reservation.startTime.toLocaleString()} ~ ${reservation.endTime.toLocaleString()}）已因场地维护被取消。原因：${reason}`,
+                    notificationType: 'system',
+                });
+                await notificationRepo.save(notification);
             }
 
             const maintenance = reservationRepo.create({

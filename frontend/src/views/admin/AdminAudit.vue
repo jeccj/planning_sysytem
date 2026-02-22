@@ -1,8 +1,8 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import api from '../api/axios'
+import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { formatDateTime, getStatusLabel, getStatusType, isUserDismiss } from '../utils/formatters'
+import { formatDateTime, getStatusLabel, getStatusType, isUserDismiss } from '../../utils/formatters'
 
 const reservations = ref([])
 const filterStatus = ref('')
@@ -83,6 +83,44 @@ const handleDecision = async (id, status, reason = null) => {
         fetchReservations()
     } catch (e) {
         ElMessage.error("操作失败")
+    }
+}
+
+// 审批通过 — 弹窗确认
+const handleApprove = async (item) => {
+    try {
+        await ElMessageBox.confirm(
+            `确定要通过"${item.activity_name}"的预约申请吗？`,
+            '审批确认',
+            { confirmButtonText: '确认通过', cancelButtonText: '取消', type: 'success' }
+        )
+        await handleDecision(item.id, 'approved')
+    } catch (e) {
+        // 用户取消
+    }
+}
+
+// 驳回 — 必须填写理由
+const handleReject = async (item) => {
+    try {
+        const { value } = await ElMessageBox.prompt(
+            `请填写驳回"${item.activity_name}"的理由：`,
+            '驳回申请',
+            {
+                confirmButtonText: '确认驳回',
+                cancelButtonText: '取消',
+                type: 'warning',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入驳回理由（必填）',
+                inputValidator: (val) => {
+                    if (!val || !val.trim()) return '请填写驳回理由'
+                    return true
+                },
+            }
+        )
+        await handleDecision(item.id, 'rejected', value.trim())
+    } catch (e) {
+        // 用户取消
     }
 }
 
@@ -195,6 +233,11 @@ const getRiskParams = (score) => {
                     </div>
 
                     <div class="card-section">
+                        <p class="section-title">活动简要说明</p>
+                        <p class="proposal-text">{{ item.activity_description || '暂无说明' }}</p>
+                    </div>
+
+                    <div class="card-section">
                         <p class="section-title">提案内容</p>
                         <p class="proposal-text">{{ item.proposal_content || '暂无提案内容' }}</p>
                         <a v-if="item.proposal_url" :href="getProposalLink(item.proposal_url)" target="_blank" class="proposal-link">
@@ -204,7 +247,7 @@ const getRiskParams = (score) => {
 
                     <div class="card-section">
                         <p class="section-title">AI 风险评估</p>
-                        <template v-if="item.ai_risk_score !== null">
+                        <template v-if="item.ai_risk_score != null">
                             <el-tag :type="getRiskParams(item.ai_risk_score).type" effect="dark" size="small">
                                 {{ getRiskParams(item.ai_risk_score).label }} ({{ item.ai_risk_score }})
                             </el-tag>
@@ -215,8 +258,8 @@ const getRiskParams = (score) => {
 
                     <div class="card-actions">
                         <template v-if="item.status === 'pending'">
-                            <el-button type="success" size="small" @click="handleDecision(item.id, 'approved')">通过</el-button>
-                            <el-button type="danger" size="small" @click="handleDecision(item.id, 'rejected', '不符合安全规定')">驳回</el-button>
+                            <el-button type="success" size="small" @click="handleApprove(item)">通过</el-button>
+                            <el-button type="danger" size="small" @click="handleReject(item)">驳回</el-button>
                         </template>
                         <el-button v-if="canMarkUsed(item)" type="primary" size="small" @click="handleMarkUsed(item)">
                             标记已使用

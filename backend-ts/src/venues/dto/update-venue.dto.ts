@@ -1,23 +1,23 @@
 import { IsString, IsNotEmpty, IsInt, IsArray, IsOptional, IsEnum, Min } from 'class-validator';
 import { VenueStatus } from '../../common/enums';
 
-export class CreateVenueDto {
+export class UpdateVenueDto {
     @IsString()
-    @IsNotEmpty()
-    name: string;
-
-    @IsString()
-    @IsNotEmpty()
-    type: string;
-
-    @IsInt()
-    @Min(1)
-    @IsNotEmpty()
-    capacity: number;
+    @IsOptional()
+    name?: string;
 
     @IsString()
     @IsOptional()
-    location: string;
+    type?: string;
+
+    @IsInt()
+    @Min(1)
+    @IsOptional()
+    capacity?: number;
+
+    @IsString()
+    @IsOptional()
+    location?: string;
 
     @IsString()
     @IsOptional()
@@ -33,7 +33,8 @@ export class CreateVenueDto {
 
     @IsArray()
     @IsString({ each: true })
-    facilities: string[];
+    @IsOptional()
+    facilities?: string[];
 
     @IsEnum(VenueStatus)
     @IsOptional()

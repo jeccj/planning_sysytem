@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -65,7 +65,13 @@ export class UsersController {
 
     @Delete(':id')
     @Roles(UserRole.SYS_ADMIN)
-    async remove(@Param('id') id: string): Promise<void> {
+    async remove(
+        @CurrentUser() user: User,
+        @Param('id') id: string,
+    ): Promise<void> {
+        if (user.id === +id) {
+            throw new HttpException('Cannot delete your own account', HttpStatus.BAD_REQUEST);
+        }
         await this.usersService.remove(+id);
     }
 }

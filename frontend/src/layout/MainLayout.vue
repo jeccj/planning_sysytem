@@ -292,7 +292,7 @@ const handleSubmitPwd = async () => {
         return
     }
     try {
-        await api.post('/auth/change-password', {
+        await api.put('/auth/change-password', {
             old_password: pwdForm.value.old_password,
             new_password: pwdForm.value.new_password
         })
@@ -494,7 +494,7 @@ const handleLogout = () => {
     </el-container>
 
     <!-- Notice Dialog -->
-    <el-dialog v-model="showNotice" title="系统公告" width="520px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false" :lock-scroll="false">
+    <el-dialog v-model="showNotice" title="系统公告" width="520px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false" :lock-scroll="false" class="glass-dialog" align-center append-to-body>
         <div v-if="latestAnnouncement" class="notice-body">
             <h3 class="notice-title">{{ latestAnnouncement.title }}</h3>
             <div class="notice-time">发布时间：{{ formatTime(latestAnnouncement.publish_time) }}</div>
@@ -507,7 +507,7 @@ const handleLogout = () => {
     </el-dialog>
 
     <!-- Change Password Dialog (Force) -->
-    <el-dialog v-model="showChangePwd" title="⚠️ 安全提醒：请修改初始密码" width="400px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false" :lock-scroll="false">
+    <el-dialog v-model="showChangePwd" title="⚠️ 安全提醒：请修改初始密码" width="400px" :show-close="false" :close-on-click-modal="false" :close-on-press-escape="false" :lock-scroll="false" class="glass-dialog" align-center append-to-body>
         <p style="color:red; margin-bottom:15px;">您正在使用初始密码，为了账号安全，请立即修改密码。</p>
         <el-form :model="pwdForm" label-position="top">
             <el-form-item label="旧密码">

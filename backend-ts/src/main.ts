@@ -1,12 +1,13 @@
+// dotenv MUST be loaded before any other imports so process.env is populated
+// when modules evaluate their top-level constants (JWT_SECRET, DATABASE_PATH, etc.)
+import * as path from 'path';
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
-import * as dotenv from 'dotenv';
-import * as path from 'path';
 
 async function bootstrap() {
-  // Load .env manually to ensure it's loaded before anything else if not using ConfigModule
-  dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
   const app = await NestFactory.create(AppModule);
 

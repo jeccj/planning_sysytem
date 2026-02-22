@@ -206,7 +206,7 @@ const filteredAnnouncements = computed(() => {
     </div>
     <el-empty v-if="filteredAnnouncements.length === 0" description="没有符合条件的公告" />
 
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑公告' : '发布公告'" width="700px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑公告' : '发布公告'" width="700px" class="glass-dialog" align-center append-to-body>
       <el-form :model="form">
         <div class="form-pill">
           <el-form-item label="公告标题">

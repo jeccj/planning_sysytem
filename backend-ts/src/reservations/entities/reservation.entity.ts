@@ -41,6 +41,9 @@ export class Reservation {
     @Column({ name: 'proposal_content', type: 'text' })
     proposalContent: string;
 
+    @Column({ name: 'activity_description', type: 'text', nullable: true })
+    activityDescription: string;
+
     @Column({
         type: 'varchar',
         default: ReservationStatus.PENDING,
