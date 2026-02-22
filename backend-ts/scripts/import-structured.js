@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 const DEFAULT_DB_PATH = path.resolve(process.cwd(), '..', 'campus.db');
 

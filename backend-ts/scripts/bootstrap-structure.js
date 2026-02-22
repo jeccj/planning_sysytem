@@ -1,6 +1,6 @@
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 const DB_PATH = process.env.DATABASE_PATH
   ? path.resolve(process.cwd(), process.env.DATABASE_PATH)

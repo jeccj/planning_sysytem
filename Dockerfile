@@ -14,9 +14,6 @@ RUN npm run build
 # ============================================================
 FROM node:18-alpine AS backend-build
 
-# bcrypt needs python3, make, g++ to compile native addon
-RUN apk add --no-cache python3 make g++
-
 WORKDIR /build/backend-ts
 COPY backend-ts/package.json backend-ts/package-lock.json* ./
 RUN npm install --legacy-peer-deps
@@ -28,16 +25,11 @@ RUN npm run build
 # ============================================================
 FROM node:18-alpine
 
-RUN apk add --no-cache python3 make g++
-
 WORKDIR /app
 
 # Copy backend package.json & install production dependencies only
 COPY backend-ts/package.json backend-ts/package-lock.json* ./backend-ts/
 RUN cd backend-ts && npm install --omit=dev --legacy-peer-deps
-
-# Remove build tools after native modules are compiled
-RUN apk del python3 make g++
 
 # Copy compiled backend
 COPY --from=backend-build /build/backend-ts/dist ./backend-ts/dist
