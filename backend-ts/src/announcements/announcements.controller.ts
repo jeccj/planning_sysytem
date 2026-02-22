@@ -59,7 +59,11 @@ export class AnnouncementsController {
             const a = await this.announcementsService.update(+id, updateAnnouncementDto);
             return AnnouncementResponseDto.fromEntity(a);
         } catch (error) {
-            throw new HttpException('Announcement not found', HttpStatus.NOT_FOUND);
+            if (error instanceof HttpException) throw error;
+            if (error.message === 'Announcement not found') {
+                throw new HttpException('Announcement not found', HttpStatus.NOT_FOUND);
+            }
+            throw new HttpException(error.message || 'Update failed', HttpStatus.BAD_REQUEST);
         }
     }
 

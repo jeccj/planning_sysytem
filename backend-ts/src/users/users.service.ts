@@ -30,12 +30,12 @@ export class UsersService {
     }
 
     sanitizeIdentityLast6(raw?: string): string {
-        const digits = (raw || '').replace(/\D/g, '');
-        if (!digits) return '';
-        if (digits.length !== 6) {
-            throw new BadRequestException('identity_last6 must be exactly 6 digits');
+        const cleaned = (raw || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+        if (!cleaned) return '';
+        if (cleaned.length !== 6) {
+            throw new BadRequestException('identity_last6 must be exactly 6 characters (digits or X)');
         }
-        return digits;
+        return cleaned;
     }
 
     async create(createUserDto: CreateUserDto): Promise<User> {
@@ -43,6 +43,11 @@ export class UsersService {
             if (!createUserDto.managed_building && !createUserDto.managed_floor) {
                 throw new BadRequestException('floor_admin requires managed_building or managed_floor');
             }
+        }
+
+        const existingUser = await this.findByUsername(createUserDto.username);
+        if (existingUser) {
+            throw new BadRequestException('Username already exists');
         }
 
         const saltRounds = 10;
@@ -70,6 +75,10 @@ export class UsersService {
         }
 
         if (typeof updateUserDto.username === 'string') {
+            const existingUser = await this.findByUsername(updateUserDto.username);
+            if (existingUser && existingUser.id !== id) {
+                throw new BadRequestException('Username already exists');
+            }
             user.username = updateUserDto.username;
         }
 
@@ -136,6 +145,10 @@ export class UsersService {
     }
 
     async remove(id: number): Promise<void> {
+        const user = await this.findOne(id);
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
         await this.userRepository.delete(id);
     }
 }

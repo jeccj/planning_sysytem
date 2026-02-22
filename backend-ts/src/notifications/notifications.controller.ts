@@ -31,15 +31,9 @@ export class NotificationsController {
     }
 
     @Post()
-    async create(@Body() createNotificationDto: CreateNotificationDto): Promise<NotificationResponseDto> {
-        const n = await this.notificationsService.create(createNotificationDto);
-        return NotificationResponseDto.fromEntity(n);
-    }
-
-    @Post('send')
     @UseGuards(RolesGuard)
     @Roles(UserRole.SYS_ADMIN)
-    async send(@Body() createNotificationDto: CreateNotificationDto): Promise<NotificationResponseDto> {
+    async create(@Body() createNotificationDto: CreateNotificationDto): Promise<NotificationResponseDto> {
         const n = await this.notificationsService.create(createNotificationDto);
         return NotificationResponseDto.fromEntity(n);
     }
@@ -53,7 +47,8 @@ export class NotificationsController {
             const n = await this.notificationsService.markAsRead(+id, user.id);
             return NotificationResponseDto.fromEntity(n);
         } catch (error) {
-            throw new HttpException('Notification not found', HttpStatus.NOT_FOUND);
+            if (error instanceof HttpException) throw error;
+            throw new HttpException(error.message || 'Notification not found', HttpStatus.NOT_FOUND);
         }
     }
 
@@ -71,7 +66,8 @@ export class NotificationsController {
         try {
             await this.notificationsService.remove(+id, user.id);
         } catch (error) {
-            throw new HttpException('Notification not found', HttpStatus.NOT_FOUND);
+            if (error instanceof HttpException) throw error;
+            throw new HttpException(error.message || 'Notification not found', HttpStatus.NOT_FOUND);
         }
     }
 }

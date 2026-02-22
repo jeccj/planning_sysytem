@@ -100,7 +100,7 @@ const handlePasswordChange = async () => {
   
   passwordLoading.value = true
   try {
-    await api.post('/auth/change-password', {
+    await api.put('/auth/change-password', {
       old_password: passwordForm.value.oldPassword,
       new_password: passwordForm.value.newPassword
     })
@@ -186,9 +186,9 @@ const handleForgotPassword = async () => {
     ElMessage.warning('请输入用户名')
     return
   }
-  const identity = (forgotForm.value.identity_last6 || '').replace(/\D/g, '')
+  const identity = (forgotForm.value.identity_last6 || '').replace(/[^0-9Xx]/g, '').toUpperCase()
   if (identity.length !== 6) {
-    ElMessage.warning('身份证后六位必须是6位数字')
+    ElMessage.warning('身份证后六位必须是6位（数字或X）')
     return
   }
   if (!forgotForm.value.new_password || forgotForm.value.new_password.length < 6) {
@@ -212,7 +212,7 @@ const handleForgotPassword = async () => {
     form.value.password = ''
     showForgotDialog.value = false
   } catch (error) {
-    ElMessage.error(error?.response?.data?.message || '重置失败，请核对信息')
+    ElMessage.error(error?.response?.data?.detail || error?.response?.data?.message || '重置失败，请核对信息')
   } finally {
     forgotLoading.value = false
   }
@@ -264,6 +264,8 @@ const handleForgotPassword = async () => {
       :show-close="false"
       :lock-scroll="false"
       class="glass-dialog"
+      align-center
+      append-to-body
     >
       <div class="password-change-hint">
         <el-alert type="warning" :closable="false" show-icon>
@@ -303,6 +305,8 @@ const handleForgotPassword = async () => {
       :close-on-click-modal="false"
       :lock-scroll="false"
       class="glass-dialog announcement-dialog"
+      align-center
+      append-to-body
     >
       <div class="announcement-list">
         <!-- Unread Notifications Section -->
@@ -337,10 +341,9 @@ const handleForgotPassword = async () => {
       v-model="showForgotDialog"
       title="忘记密码"
       width="430px"
-      :teleported="false"
-      :modal-append-to-body="false"
-      :lock-scroll="false"
       class="glass-dialog"
+      align-center
+      append-to-body
     >
       <el-alert type="info" :closable="false" show-icon>
         使用用户名 + 身份证后六位验证身份后重置新密码

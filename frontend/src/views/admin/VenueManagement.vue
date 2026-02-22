@@ -472,10 +472,9 @@ const openBuildingDetail = (buildingName) => {
       v-model="showBuildingView"
       :title="`${selectedBuilding} · 教室列表`"
       width="820px"
-      :teleported="false"
-      :modal-append-to-body="false"
-      :lock-scroll="false"
       class="glass-dialog"
+      align-center
+      append-to-body
     >
       <div class="venue-grid">
         <el-card v-for="venue in activeBuildingClassrooms" :key="venue.id" shadow="never" class="venue-compact-card app-panel">
@@ -535,7 +534,7 @@ const openBuildingDetail = (buildingName) => {
     </el-dialog>
 
     <!-- Create/Edit Modal -->
-    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" :teleported="false" :modal-append-to-body="false" class="glass-dialog venue-edit-dialog">
+    <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" class="glass-dialog venue-edit-dialog" align-center append-to-body>
         <el-form :model="form" label-width="100px">
             <el-row :gutter="20">
               <el-col :span="12">
@@ -632,7 +631,7 @@ const openBuildingDetail = (buildingName) => {
                 >
                   <el-icon><Plus /></el-icon>
                 </el-upload>
-                <el-dialog v-model="previewVisible" title="预览" width="600px" append-to-body>
+                <el-dialog v-model="previewVisible" title="预览" width="600px" append-to-body align-center>
                   <img :src="previewUrl" style="width: 100%" alt="预览" />
                 </el-dialog>
             </el-form-item>
@@ -650,7 +649,7 @@ const openBuildingDetail = (buildingName) => {
     </el-dialog>
 
     <!-- Maintenance Schedule Modal -->
-    <el-dialog v-model="showMaintenanceModal" title="预约维护时段" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
+    <el-dialog v-model="showMaintenanceModal" title="预约维护时段" width="500px" class="glass-dialog" align-center append-to-body>
         <el-form :model="maintenanceForm" label-width="80px">
             <el-form-item label="原因">
                 <el-input v-model="maintenanceForm.reason" placeholder="例如：设备检修" />

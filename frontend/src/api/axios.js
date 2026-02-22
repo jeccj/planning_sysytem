@@ -1,9 +1,10 @@
 import axios from 'axios'
 import { useAuthStore } from '../stores/auth'
+import router from '../router'
 
 const api = axios.create({
     baseURL: '/api',
-    timeout: 5000
+    timeout: 15000
 })
 
 api.interceptors.request.use((config) => {
@@ -14,12 +15,16 @@ api.interceptors.request.use((config) => {
     return config
 })
 
+let isLoggingOut = false
+
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response && error.response.status === 401) {
+        if (error.response && error.response.status === 401 && !isLoggingOut) {
+            isLoggingOut = true
             const authStore = useAuthStore()
             authStore.logout()
+            router.push('/login').finally(() => { isLoggingOut = false })
         }
         return Promise.reject(error)
     }

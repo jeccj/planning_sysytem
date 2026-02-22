@@ -17,6 +17,7 @@ export class VenueResponseDto {
     open_hours?: string;
     description?: string;
     admin_id?: number;
+    is_reserved?: boolean;
     match_details?: string[];
     score?: number;
 }

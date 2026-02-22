@@ -81,15 +81,15 @@ const isScopedRole = (role) => ['floor_admin', 'venue_admin'].includes(role)
 
 const submitEdit = async () => {
     try {
-        if (editForm.value.identity_last6 && !/^\d{6}$/.test(editForm.value.identity_last6)) {
-            ElMessage.warning('身份证后六位必须是6位数字')
+        if (editForm.value.identity_last6 && !/^[\dXx]{6}$/.test(editForm.value.identity_last6)) {
+            ElMessage.warning('身份证后六位必须是6位（数字或X）')
             return
         }
         const payload = {
             username: editForm.value.username,
             role: editForm.value.role,
             contact_info: '',
-            identity_last6: editForm.value.identity_last6 || '',
+            identity_last6: (editForm.value.identity_last6 || '').toUpperCase(),
             managed_building: editForm.value.managed_building || '',
             managed_floor: editForm.value.managed_floor || ''
         }
@@ -133,7 +133,7 @@ const sendNotification = async () => {
     }
     
     try {
-        await api.post('/notifications/send', {
+        await api.post('/notifications/', {
             user_id: notifyForm.value.userId,
             title: notifyForm.value.title,
             content: notifyForm.value.content,
@@ -200,6 +200,40 @@ const createForm = ref({
     managed_floor: ''
 })
 
+// 从场馆数据中提取楼栋和楼层选项
+const buildingOptions = computed(() => {
+    const set = new Set()
+    venues.value.forEach(v => {
+        if (v.building_name) set.add(v.building_name)
+    })
+    return [...set].sort()
+})
+
+const getFloorOptions = (building) => {
+    if (!building) return []
+    const set = new Set()
+    venues.value
+        .filter(v => v.building_name === building && v.floor_label)
+        .forEach(v => set.add(v.floor_label))
+    return [...set].sort()
+}
+
+const editFloorOptions = computed(() => getFloorOptions(editForm.value.managed_building))
+const createFloorOptions = computed(() => getFloorOptions(createForm.value.managed_building))
+
+// 编辑表单：楼栋变化时清空楼层
+watch(() => editForm.value.managed_building, (newVal, oldVal) => {
+    if (oldVal !== undefined && newVal !== oldVal) {
+        editForm.value.managed_floor = ''
+    }
+})
+// 创建表单：楼栋变化时清空楼层
+watch(() => createForm.value.managed_building, (newVal, oldVal) => {
+    if (oldVal !== undefined && newVal !== oldVal) {
+        createForm.value.managed_floor = ''
+    }
+})
+
 function openCreate() {
     createForm.value = {
         username: '',
@@ -218,13 +252,17 @@ const submitCreate = async () => {
         ElMessage.warning('请填写用户名和密码')
         return
     }
-    if (createForm.value.identity_last6 && !/^\d{6}$/.test(createForm.value.identity_last6)) {
-        ElMessage.warning('身份证后六位必须是6位数字')
+    if (createForm.value.identity_last6 && !/^[\dXx]{6}$/.test(createForm.value.identity_last6)) {
+        ElMessage.warning('身份证后六位必须是6位（数字或X）')
         return
     }
     
     try {
-        await api.post('/users/', createForm.value)
+        const createPayload = {
+            ...createForm.value,
+            identity_last6: (createForm.value.identity_last6 || '').toUpperCase(),
+        }
+        await api.post('/users/', createPayload)
         ElMessage.success('用户创建成功')
         showCreateModal.value = false
         fetchUsers()
@@ -286,7 +324,7 @@ const submitCreate = async () => {
         <el-empty v-if="filteredUsers.length === 0" description="没有符合条件的用户" />
 
         <!-- 编辑用户弹窗 -->
-        <el-dialog v-model="showModal" title="编辑用户" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
+        <el-dialog v-model="showModal" title="编辑用户" width="500px" class="glass-dialog" align-center append-to-body>
             <el-form :model="editForm" label-width="80px">
                 <el-form-item label="用户名">
                     <el-input v-model="editForm.username" disabled />
@@ -307,10 +345,14 @@ const submitCreate = async () => {
 
                 <template v-if="isScopedRole(editForm.role)">
                     <el-form-item label="权限楼栋">
-                        <el-input v-model="editForm.managed_building" placeholder="例如：A栋" />
+                        <el-select v-model="editForm.managed_building" placeholder="请选择楼栋" filterable allow-create style="width: 100%">
+                            <el-option v-for="b in buildingOptions" :key="b" :label="b" :value="b" />
+                        </el-select>
                     </el-form-item>
                     <el-form-item label="权限楼层">
-                        <el-input v-model="editForm.managed_floor" placeholder="例如：3层" />
+                        <el-select v-model="editForm.managed_floor" placeholder="请先选择楼栋" filterable allow-create style="width: 100%" :disabled="!editForm.managed_building">
+                            <el-option v-for="f in editFloorOptions" :key="f" :label="f" :value="f" />
+                        </el-select>
                     </el-form-item>
                 </template>
 
@@ -325,7 +367,7 @@ const submitCreate = async () => {
         </el-dialog>
 
         <!-- 发送通知弹窗 -->
-        <el-dialog v-model="showNotifyModal" title="发送通知" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
+        <el-dialog v-model="showNotifyModal" title="发送通知" width="500px" class="glass-dialog" align-center append-to-body>
             <el-alert type="info" :closable="false" style="margin-bottom: 20px;">
                 向用户 <strong>{{ notifyForm.username }}</strong> 发送系统通知
             </el-alert>
@@ -349,7 +391,7 @@ const submitCreate = async () => {
         </el-dialog>
 
         <!-- 新增用户弹窗 -->
-        <el-dialog v-model="showCreateModal" title="新增用户" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
+        <el-dialog v-model="showCreateModal" title="新增用户" width="500px" class="glass-dialog" align-center append-to-body>
             <el-form :model="createForm" label-width="80px">
                 <el-form-item label="用户名">
                     <el-input v-model="createForm.username" placeholder="学号/工号" />
@@ -370,10 +412,14 @@ const submitCreate = async () => {
                 </el-form-item>
                 <template v-if="isScopedRole(createForm.role)">
                     <el-form-item label="权限楼栋">
-                        <el-input v-model="createForm.managed_building" placeholder="例如：A栋" />
+                        <el-select v-model="createForm.managed_building" placeholder="请选择楼栋" filterable allow-create style="width: 100%">
+                            <el-option v-for="b in buildingOptions" :key="b" :label="b" :value="b" />
+                        </el-select>
                     </el-form-item>
                     <el-form-item label="权限楼层">
-                        <el-input v-model="createForm.managed_floor" placeholder="例如：3层" />
+                        <el-select v-model="createForm.managed_floor" placeholder="请先选择楼栋" filterable allow-create style="width: 100%" :disabled="!createForm.managed_building">
+                            <el-option v-for="f in createFloorOptions" :key="f" :label="f" :value="f" />
+                        </el-select>
                     </el-form-item>
                 </template>
                 <el-form-item label="联系方式">

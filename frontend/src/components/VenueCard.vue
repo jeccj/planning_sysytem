@@ -50,7 +50,7 @@ defineEmits(['book', 'view-detail'])
                     <div class="action-btn-circle view-btn" @click.stop="$emit('view-detail', venue)" title="查看详情">
                         <el-icon><View /></el-icon>
                     </div>
-                    <div class="action-btn-circle" :class="{ 'is-busy': venue.status !== 'available' }" @click.stop="$emit('book', venue)" title="预约">
+                    <div class="action-btn-circle" :class="{ 'is-busy': venue.status !== 'available' }" @click.stop="venue.status === 'available' ? $emit('book', venue) : null" title="预约">
                         <el-icon><ArrowRight /></el-icon>
                     </div>
                 </div>

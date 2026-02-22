@@ -50,17 +50,11 @@ export class NotificationsService {
     }
 
     async markAllAsRead(userId: number): Promise<number> {
-        const pending = await this.notificationRepository.find({
-            where: { userId, isRead: false },
-        });
-        if (pending.length === 0) {
-            return 0;
-        }
-        pending.forEach((item) => {
-            item.isRead = true;
-        });
-        await this.notificationRepository.save(pending);
-        return pending.length;
+        const result = await this.notificationRepository.update(
+            { userId, isRead: false },
+            { isRead: true },
+        );
+        return result.affected || 0;
     }
 
     async remove(id: number, userId: number): Promise<void> {

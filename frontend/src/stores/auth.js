@@ -40,7 +40,7 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = null
         localStorage.removeItem('token')
         localStorage.removeItem('user')
-        // Router might not be available here depending on initialization, relying on component to redirect
+        delete api.defaults.headers.common['Authorization']
     }
 
     return { token, user, isAuthenticated, isSysAdmin, isVenueAdmin, login, logout }

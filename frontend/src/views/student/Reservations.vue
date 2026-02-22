@@ -105,7 +105,7 @@ const openDetail = (reservation) => {
           </el-table-column>
           <el-table-column label="AI评分" width="100">
              <template #default="scope">
-                <el-tag v-if="scope.row.ai_risk_score !== null" 
+                <el-tag v-if="scope.row.ai_risk_score != null" 
                     :type="scope.row.ai_risk_score > 70 ? 'danger' : scope.row.ai_risk_score > 30 ? 'warning' : 'success'"
                     size="small">
                     {{ scope.row.ai_risk_score }}分
@@ -154,7 +154,7 @@ const openDetail = (reservation) => {
                       <span class="label">人数:</span>
                       <span class="value">{{ reservation.attendees_count }}人</span>
                   </div>
-                  <div v-if="reservation.ai_risk_score !== null" class="card-row">
+                  <div v-if="reservation.ai_risk_score != null" class="card-row">
                       <span class="label">AI评分:</span>
                       <el-tag :type="reservation.ai_risk_score > 70 ? 'danger' : reservation.ai_risk_score > 30 ? 'warning' : 'success'" size="small">
                           {{ reservation.ai_risk_score }}分
@@ -179,7 +179,7 @@ const openDetail = (reservation) => {
     </div>
 
     <!-- 预约详情弹窗 -->
-    <el-dialog v-model="showDetailDialog" title="预约详情" width="500px" :teleported="false" :modal-append-to-body="false" :lock-scroll="false" class="glass-dialog">
+    <el-dialog v-model="showDetailDialog" title="预约详情" width="500px" class="glass-dialog" align-center append-to-body>
         <div v-if="selectedReservation" class="detail-content">
             <div class="detail-item">
                 <span class="label">活动名称</span>
@@ -221,6 +221,10 @@ const openDetail = (reservation) => {
             </div>
             <div class="detail-item full">
                 <span class="label">活动说明</span>
+                <div class="value proposal">{{ selectedReservation.activity_description || '无' }}</div>
+            </div>
+            <div class="detail-item full">
+                <span class="label">活动提案</span>
                 <div class="value proposal">{{ selectedReservation.proposal_content || '无' }}</div>
             </div>
             <div v-if="selectedReservation.ai_audit_comment" class="detail-item full">
@@ -479,12 +483,6 @@ const openDetail = (reservation) => {
     
     .card-actions .el-button:hover {
         transform: translateY(-1px);
-    }
-    
-    /* Detail dialog - full width on mobile */
-    :deep(.glass-dialog) {
-        width: 90% !important;
-        max-width: 400px !important;
     }
     
     .detail-content {

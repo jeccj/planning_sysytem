@@ -75,6 +75,10 @@ export class CreateRecurringReservationDto {
     @IsString()
     proposal_content: string;
 
+    @IsString()
+    @IsOptional()
+    activity_description?: string;
+
     @ValidateNested()
     @Type(() => RecurrenceRuleDto)
     recurrence: RecurrenceRuleDto;
@@ -116,6 +120,10 @@ export class CreateBatchReservationItemDto {
 
     @IsString()
     proposal_content: string;
+
+    @IsString()
+    @IsOptional()
+    activity_description?: string;
 }
 
 export class CreateBatchReservationDto {

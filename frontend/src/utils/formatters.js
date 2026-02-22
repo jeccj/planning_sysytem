@@ -6,13 +6,17 @@
 /** 格式化时间戳为本地字符串 */
 export const formatTime = (value) => {
   if (!value) return ''
-  return new Date(value).toLocaleString()
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleString()
 }
 
 /** 格式化时间戳为详细的日期时间（年-月-日 时:分） */
 export const formatDateTime = (value) => {
   if (!value) return ''
-  return new Date(value).toLocaleString('zh-CN', {
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

@@ -282,7 +282,7 @@ onMounted(() => {
 
 const handleDeleteActivity = async (id) => {
     try {
-        await ElMessageBox.confirm('确定要从动态列表中删除此项吗？', '提示', {
+        await ElMessageBox.confirm('确定要永久删除这条预约记录吗？此操作不可恢复。', '警告', {
             confirmButtonText: '确定',
             cancelButtonText: '取消',
             type: 'warning'

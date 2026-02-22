@@ -4,6 +4,8 @@ import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { VenuesService } from './venues.service';
 import { CreateVenueDto } from './dto/create-venue.dto';
+import { UpdateVenueDto } from './dto/update-venue.dto';
+import { ScheduleMaintenanceDto } from './dto/schedule-maintenance.dto';
 import { VenueResponseDto } from './dto/venue-response.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -30,7 +32,11 @@ export class VenuesController {
     ): Promise<VenueResponseDto[]> {
         const scope = this.buildVenueScope(user);
         const venues = await this.venuesService.findAll(+skip, +limit, scope);
-        return venues.map(this.toResponseDto);
+        const occupiedIds = await this.venuesService.getOccupiedVenueIds(venues.map(v => v.id));
+        return venues.map(v => ({
+            ...this.toResponseDto(v),
+            is_reserved: occupiedIds.has(v.id),
+        }));
     }
 
     @Get('structure')
@@ -66,13 +72,86 @@ export class VenuesController {
         return this.toResponseDto(venue);
     }
 
+    @Get('search')
+    @UseGuards(JwtAuthGuard)
+    async search(@Query('q') q: string): Promise<VenueResponseDto[]> {
+        // 1. AI Parsing
+        const intent = await this.llmService.parseIntent(q);
+
+        console.log(`AI Search Intent: ${JSON.stringify(intent)}`);
+
+        // 2. Build date/time from intent, with sensible fallback
+        const now = new Date();
+        let startDate: Date;
+        let endDate: Date;
+
+        if (intent.date && intent.time_range?.length === 2) {
+            const [startHM, endHM] = intent.time_range;
+            startDate = new Date(`${intent.date}T${startHM}:00`);
+            endDate = new Date(`${intent.date}T${endHM}:00`);
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate <= startDate) {
+                startDate = new Date(now);
+                startDate.setDate(startDate.getDate() + 1);
+                startDate.setHours(14, 0, 0, 0);
+                endDate = new Date(startDate);
+                endDate.setHours(startDate.getHours() + 2);
+            }
+        } else if (intent.date) {
+            startDate = new Date(`${intent.date}T08:00:00`);
+            endDate = new Date(`${intent.date}T22:00:00`);
+            if (isNaN(startDate.getTime())) {
+                startDate = new Date(now);
+                startDate.setDate(startDate.getDate() + 1);
+                startDate.setHours(8, 0, 0, 0);
+                endDate = new Date(startDate);
+                endDate.setHours(22, 0, 0, 0);
+            }
+        } else {
+            startDate = new Date(now);
+            startDate.setDate(startDate.getDate() + 1);
+            startDate.setHours(14, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setHours(startDate.getHours() + 2);
+        }
+
+        const capacity = intent.capacity || 1;
+        const facilities = intent.facilities || [];
+        const keywords = intent.keywords || [];
+        const venueType = intent.type;
+
+        const results = await this.venuesService.search(
+            capacity,
+            startDate,
+            endDate,
+            facilities,
+            keywords,
+            venueType
+        );
+
+        return results.map(item => ({
+            ...this.toResponseDto(item.venue),
+            match_details: item.matchDetails,
+            score: item.score
+        }));
+    }
+
+    @Get(':id')
+    @UseGuards(JwtAuthGuard)
+    async findOne(@Param('id') id: string): Promise<VenueResponseDto> {
+        const venue = await this.venuesService.findOne(+id);
+        if (!venue) {
+            throw new HttpException('Venue not found', HttpStatus.NOT_FOUND);
+        }
+        return this.toResponseDto(venue);
+    }
+
     @Put(':id')
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
     async update(
         @CurrentUser() user: User,
         @Param('id') id: string,
-        @Body() updateVenueDto: CreateVenueDto,
+        @Body() updateVenueDto: UpdateVenueDto,
     ): Promise<VenueResponseDto> {
         try {
             const existing = await this.venuesService.findOne(+id);
@@ -112,47 +191,6 @@ export class VenuesController {
             }
             throw new HttpException('Venue not found', HttpStatus.NOT_FOUND);
         }
-    }
-
-    @Get('search')
-    async search(@Query('q') q: string): Promise<VenueResponseDto[]> {
-        // 1. AI Parsing
-        const intent = await this.llmService.parseIntent(q);
-
-        console.log(`AI Search Intent: ${JSON.stringify(intent)}`);
-
-        // 2. Default fallback logic similar to Python
-        // Mock tomorrow 2pm if date/time not found
-        const now = new Date();
-        const startDate = new Date(now);
-        startDate.setDate(startDate.getDate() + 1);
-        startDate.setHours(14, 0, 0, 0);
-
-        const endDate = new Date(startDate);
-        endDate.setHours(startDate.getHours() + 2); // Default duration 2 hours
-
-        // Override with intent data if available (simplified for now, full date parsing would be in a util)
-        // For now we use the mock dates to ensure stability, or could implement ISO parsing if intent returns ISO strings
-
-        const capacity = intent.capacity || 1;
-        const facilities = intent.facilities || [];
-        const keywords = intent.keywords || [];
-        const venueType = intent.type;
-
-        const results = await this.venuesService.search(
-            capacity,
-            startDate,
-            endDate,
-            facilities,
-            keywords,
-            venueType
-        );
-
-        return results.map(item => ({
-            ...this.toResponseDto(item.venue),
-            match_details: item.matchDetails,
-            score: item.score
-        }));
     }
 
     @Post(':id/photos')
@@ -200,14 +238,23 @@ export class VenuesController {
         if (!venue) throw new HttpException('Venue not found', HttpStatus.NOT_FOUND);
         this.assertScopedAdminVenueAccess(user, venue);
         const existingPhotos: string[] = Array.isArray(venue.photos) ? venue.photos : [];
+        if (!existingPhotos.includes(url)) {
+            throw new HttpException('Photo URL not found on this venue', HttpStatus.BAD_REQUEST);
+        }
         const filtered = existingPhotos.filter(p => p !== url);
         const updated = await this.venuesService.update(+id, { photos: filtered } as any);
-        // Best-effort delete file from disk
+        // Best-effort delete file from disk — only allow files under /uploads/venues/
         try {
-            const fs = require('fs');
-            const path = require('path');
-            const filePath = path.join(__dirname, '..', '..', url);
-            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            if (url.startsWith('/uploads/venues/') && !url.includes('..')) {
+                const fs = require('fs');
+                const path = require('path');
+                const filePath = path.join(__dirname, '..', '..', url);
+                const uploadsDir = path.resolve(path.join(__dirname, '..', '..', 'uploads', 'venues'));
+                const resolvedPath = path.resolve(filePath);
+                if (resolvedPath.startsWith(uploadsDir) && fs.existsSync(resolvedPath)) {
+                    fs.unlinkSync(resolvedPath);
+                }
+            }
         } catch { /* ignore */ }
         return this.toResponseDto(updated);
     }
@@ -240,7 +287,7 @@ export class VenuesController {
     async scheduleMaintenance(
         @CurrentUser() user: User,
         @Param('id') id: string,
-        @Body() body: { start: string; end: string; reason: string },
+        @Body() body: ScheduleMaintenanceDto,
     ) {
         try {
             const existing = await this.venuesService.findOne(+id);
@@ -255,6 +302,9 @@ export class VenuesController {
                 body.reason
             );
         } catch (error) {
+            if (error instanceof HttpException) {
+                throw error;
+            }
             throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
         }
     }
@@ -264,7 +314,7 @@ export class VenuesController {
             return;
         }
         if (![UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN].includes(user.role)) {
-            return;
+            throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
         }
         const parsed = parseVenueLocation(venue.location, venue.name);
         const venueBuilding = venue.buildingName || parsed.buildingName;
@@ -282,7 +332,7 @@ export class VenuesController {
         }
     }
 
-    private assertScopedAdminVenuePayload(user: User, payload: CreateVenueDto, existingVenue: any) {
+    private assertScopedAdminVenuePayload(user: User, payload: UpdateVenueDto | CreateVenueDto, existingVenue: any) {
         if (user.role === UserRole.SYS_ADMIN) {
             return;
         }

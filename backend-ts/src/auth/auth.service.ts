@@ -44,11 +44,14 @@ export class AuthService {
     }
 
     async login(user: User): Promise<TokenResponseDto> {
-        const payload = { sub: user.username, role: user.role };
+        const payload = { sub: user.id, username: user.username, role: user.role };
 
         return {
             access_token: this.jwtService.sign(payload),
             token_type: 'bearer',
+            user_id: user.id,
+            role: user.role,
+            is_first_login: user.isFirstLogin,
         };
     }
 
@@ -76,10 +79,10 @@ export class AuthService {
             throw new Error('User not found');
         }
 
-        const normalizedIdentity = (identityLast6 || '').replace(/\D/g, '');
-        const savedIdentity = (user.identityLast6 || '').replace(/\D/g, '');
+        const normalizedIdentity = (identityLast6 || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+        const savedIdentity = (user.identityLast6 || '').replace(/[^0-9Xx]/g, '').toUpperCase();
         if (!normalizedIdentity || normalizedIdentity.length !== 6) {
-            throw new Error('identity_last6 must be 6 digits');
+            throw new Error('identity_last6 must be 6 characters');
         }
         if (!savedIdentity) {
             throw new Error('identity_last6 is not configured');
@@ -89,7 +92,7 @@ export class AuthService {
         }
 
         user.hashedPassword = await this.hashPassword(newPassword);
-        user.isFirstLogin = false;
+        user.isFirstLogin = true;
         await this.userRepository.save(user);
     }
 }

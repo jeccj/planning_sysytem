@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Put, Body, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -28,7 +28,7 @@ export class AuthController {
     }
 
     @UseGuards(JwtAuthGuard)
-    @Post('change-password')
+    @Put('change-password')
     async changePassword(
         @CurrentUser() user: User,
         @Body() changePasswordDto: ChangePasswordDto,
@@ -48,7 +48,10 @@ export class AuthController {
                 contact_info: updatedUser.contactInfo,
             };
         } catch (error) {
-            throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+            if (error instanceof HttpException) throw error;
+            const msg = error.message || 'Password change failed';
+            const status = msg.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+            throw new HttpException(msg, status);
         }
     }
 
@@ -62,7 +65,9 @@ export class AuthController {
             );
             return { ok: true, message: 'Password updated' };
         } catch (error) {
-            throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+            const msg = error.message || 'Password reset failed';
+            const status = msg.includes('not found') ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+            throw new HttpException(msg, status);
         }
     }
 }
