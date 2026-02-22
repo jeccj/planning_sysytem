@@ -51,25 +51,25 @@ planning_sysytem/
 - Node.js **18+**
 - npm **9+**
 
-### 1. 启动后端
-
-```sh
-cd backend-ts
-npm install
-npm run dev
-```
-
-默认地址：`http://localhost:8001`
-
-### 2. 启动前端
+### 1. 构建前端
 
 ```sh
 cd frontend
 npm install
-npm run dev
+npm run build
+
 ```
 
-访问：`http://localhost:5173`（已配置代理 `/api → http://127.0.0.1:8001`）
+### 2. 启动后端
+
+```sh
+cd backend-ts
+npm install
+npm run build
+npm run start:prod
+```
+
+访问：`http://localhost:80`（已配置代理 `/api → http://127.0.0.1:80`）
 
 ### 3. 默认账号
 

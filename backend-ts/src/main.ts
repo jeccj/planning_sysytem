@@ -11,12 +11,15 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule);
 
-  // CORS configuration matching Python backend
+  // Set global API prefix so frontend can use /api/... in production
+  app.setGlobalPrefix('api', {
+    exclude: [],  // all routes get /api prefix
+  });
+
+  // CORS configuration – allow any origin so the front-end can be
+  // accessed via IP / domain on cloud servers.
   app.enableCors({
-    origin: [
-      'http://localhost:5173',
-      'http://127.0.0.1:5173',
-    ],
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -28,12 +31,36 @@ async function bootstrap() {
     transform: true,
   }));
 
-  // Serve static assets
+  // Serve uploaded files
   const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.use('/uploads', require('express').static(path.join(__dirname, '..', 'uploads')));
+  const express = require('express');
+  expressApp.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+
+  // Serve built frontend (npm run build in frontend/, output to frontend/dist)
+  const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
+  const fs = require('fs');
+  if (fs.existsSync(frontendDist)) {
+    expressApp.use(express.static(frontendDist));
+    // SPA fallback: any non-API route returns index.html
+    expressApp.use((req: any, res: any, next: any) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+        return next();
+      }
+      const indexPath = path.join(frontendDist, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        next();
+      }
+    });
+    console.log(`Serving frontend from: ${frontendDist}`);
+  } else {
+    console.warn(`⚠ Frontend dist not found at: ${frontendDist}`);
+    console.warn(`  Run "cd frontend && npm run build" first.`);
+  }
 
   const port = process.env.PORT || 8001;
-  await app.listen(port);
-  console.log(`Application is running on: http://localhost:${port}`);
+  await app.listen(port, '0.0.0.0');
+  console.log(`Application is running on: http://0.0.0.0:${port}`);
 }
 bootstrap();
