@@ -27,13 +27,14 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy backend package.json & install production dependencies only
+# Copy backend package.json + compiled output + node_modules from build stage
 COPY backend-ts/package.json backend-ts/package-lock.json* ./backend-ts/
-RUN cd backend-ts && npm install --omit=dev --legacy-peer-deps
-
-# Copy compiled backend
 COPY --from=backend-build /build/backend-ts/dist ./backend-ts/dist
 COPY --from=backend-build /build/backend-ts/nest-cli.json ./backend-ts/
+COPY --from=backend-build /build/backend-ts/node_modules ./backend-ts/node_modules
+
+# Remove devDependencies (much faster than a fresh npm install)
+RUN cd backend-ts && npm prune --omit=dev --legacy-peer-deps
 
 # Copy built frontend
 COPY --from=frontend-build /build/frontend/dist ./frontend/dist
