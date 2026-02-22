@@ -25,7 +25,7 @@ const authStore = useAuthStore()
 
 const activeMenu = computed(() => route.path)
 const userRole = computed(() => authStore.user?.role)
-const showLlmStatusIsland = computed(() => route.path.includes('/student/dashboard'))
+const showLlmStatusIsland = computed(() => true)
 const hasManagedScope = computed(() => {
     const building = (authStore.user?.managed_building || '').trim()
     const floor = (authStore.user?.managed_floor || '').trim()

@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    container_name: campus-venue
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      - PORT=80
+      - DATABASE_PATH=../data/campus.db
+      - JWT_SECRET=CHANGE_ME_IN_PRODUCTION
+      - JWT_EXPIRATION=30m
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - app-data:/app/data
+      - app-uploads:/app/backend-ts/uploads
+
+volumes:
+  app-data:
+    driver: local
+  app-uploads:
+    driver: local
