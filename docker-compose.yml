@@ -7,16 +7,15 @@ services:
       - "80:80"
     environment:
       - PORT=80
-      - DATABASE_PATH=../data/campus.db
+      # 后端运行在 /app/backend-ts，所以 ../campus.db 指向 /app/campus.db
+      - DATABASE_PATH=../campus.db
       - JWT_SECRET=CHANGE_ME_IN_PRODUCTION
       - JWT_EXPIRATION=30m
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     volumes:
-      - app-data:/app/data
-      - app-uploads:/app/backend-ts/uploads
+      # 【关键修改1】直接挂载根目录的 db 文件到容器内部
+      - ./campus.db:/app/campus.db
+      # 【关键修改2】直接挂载 uploads 目录
+      - ./backend-ts/uploads:/app/backend-ts/uploads
 
-volumes:
-  app-data:
-    driver: local
-  app-uploads:
-    driver: local
+# 【关键修改3】删除了底部的 volumes 定义，因为我们现在全用本地路径
