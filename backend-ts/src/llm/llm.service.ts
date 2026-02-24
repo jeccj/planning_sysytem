@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { SystemConfigService } from '../system-config/system-config.service';
+import {
+    buildAuditPrompt,
+    buildParseIntentPrompt,
+    DEFAULT_LLM_JSON_GUARD_PROMPT,
+    DEFAULT_LLM_AUDIT_RULES,
+    DEFAULT_LLM_PARSE_INTENT_RULES,
+    DEFAULT_LLM_SYSTEM_PROMPT,
+} from './prompt-templates';
 
 export interface IntentResult {
     date?: string;
@@ -8,6 +16,7 @@ export interface IntentResult {
     capacity?: number;
     facilities?: string[];
     keywords?: string[];
+    building?: string;
     type?: string;
     activity_name?: string;
     organizer_unit?: string;
@@ -20,6 +29,27 @@ export interface AuditResult {
     reason: string;
 }
 
+export interface VenueSearchExplainInput {
+    query: string;
+    intent: IntentResult;
+    resultCount: number;
+    defaultAssumptions?: string[];
+    topResults: Array<{
+        name: string;
+        location: string;
+        capacity: number;
+        type?: string;
+        score?: number;
+        match_details?: string[];
+    }>;
+}
+
+export interface VenueSearchInsight {
+    summary: string;
+    criteria: string[];
+    tips: string[];
+}
+
 
 @Injectable()
 export class LlmService {
@@ -27,6 +57,10 @@ export class LlmService {
     private openaiClient: any | null;
     private modelId = 'gemini-2.0-flash-lite';
     private provider = 'gemini';
+    private systemPrompt = DEFAULT_LLM_SYSTEM_PROMPT;
+    private jsonGuardPrompt = DEFAULT_LLM_JSON_GUARD_PROMPT;
+    private parseIntentRules = DEFAULT_LLM_PARSE_INTENT_RULES;
+    private auditRules = DEFAULT_LLM_AUDIT_RULES;
 
     // 配置缓存：避免每次请求都查数据库
     private configCachedAt = 0;
@@ -46,6 +80,10 @@ export class LlmService {
         const apiKey = await this.configService.findByKey('llm_api_key') || process.env.GEMINI_API_KEY;
         const baseUrl = await this.configService.findByKey('llm_base_url');
         this.modelId = await this.configService.findByKey('llm_model') || (this.provider === 'gemini' ? 'gemini-2.0-flash-lite' : 'deepseek-chat');
+        this.systemPrompt = (await this.configService.findByKey('llm_system_prompt') || DEFAULT_LLM_SYSTEM_PROMPT).trim();
+        this.jsonGuardPrompt = (await this.configService.findByKey('llm_json_guard_prompt') || DEFAULT_LLM_JSON_GUARD_PROMPT).trim();
+        this.parseIntentRules = await this.configService.findByKey('llm_parse_intent_rules') || DEFAULT_LLM_PARSE_INTENT_RULES;
+        this.auditRules = await this.configService.findByKey('llm_audit_rules') || DEFAULT_LLM_AUDIT_RULES;
 
         console.log(`[LLM Service] Initializing client. Provider: ${this.provider}, Model: ${this.modelId}`);
 
@@ -68,12 +106,25 @@ export class LlmService {
     private async callLlm(prompt: string): Promise<string> {
         if (this.provider === 'gemini' && this.client) {
             const model = this.client.getGenerativeModel({ model: this.modelId });
-            const result = await model.generateContent(prompt);
+            const mergedPrompt = [this.systemPrompt, this.jsonGuardPrompt, prompt]
+                .map((item) => (item || '').trim())
+                .filter(Boolean)
+                .join('\n\n');
+            const result = await model.generateContent(mergedPrompt);
             const response = await result.response;
             return response.text();
         }
 
         if ((this.provider === 'deepseek' || this.provider === 'custom') && this.openaiClient) {
+            const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
+            if (this.systemPrompt) {
+                messages.push({ role: 'system', content: this.systemPrompt });
+            }
+            if (this.jsonGuardPrompt) {
+                messages.push({ role: 'system', content: this.jsonGuardPrompt });
+            }
+            messages.push({ role: 'user', content: prompt });
+
             const response = await fetch(`${this.openaiClient.baseUrl}/v1/chat/completions`, {
                 method: 'POST',
                 headers: {
@@ -82,10 +133,7 @@ export class LlmService {
                 },
                 body: JSON.stringify({
                     model: this.modelId,
-                    messages: [
-                        { role: 'system', content: 'You are a JSON-only response bot.' },
-                        { role: 'user', content: prompt },
-                    ],
+                    messages,
                     temperature: 0.1,
                 }),
             });
@@ -122,35 +170,46 @@ export class LlmService {
         return found;
     }
 
+    private extractBuildingKeyword(queryText: string): string | undefined {
+        const text = (queryText || '').trim();
+        if (!text) return undefined;
+
+        const zhMatch = text.match(/([A-Za-z0-9一二三四五六七八九十零〇两_-]{1,20}(?:楼|栋|馆|中心))/);
+        if (zhMatch?.[1]) {
+            return zhMatch[1].replace(/\s+/g, '');
+        }
+
+        const enMatch = text.match(/\b([A-Za-z0-9_-]{1,12})\s*building\b/i);
+        if (enMatch?.[1]) {
+            return `${enMatch[1].toUpperCase()}栋`;
+        }
+
+        return undefined;
+    }
+
     async parseIntent(text: string): Promise<IntentResult> {
         await this.initClient(); // Ensure fresh config
 
-        const prompt = `You are a smart assistant for a Chinese University venue reservation system.
-The database contains venues with properties like name, type, and facilities (e.g., "投影仪", "音响", "白板").
-
-Extract information from the User Query:
-- date (YYYY-MM-DD)
-- time_range (["HH:MM", "HH:MM"])
-- capacity (integer)
-- facilities (list of strings): 
-    - IMPORTANT: Return these in the SAME LANGUAGE as the query (likely Chinese).
-    - EXPAND high-level needs into specific hardware keywords (e.g., if user says "教师设备", return ["投影仪", "电脑", "多媒体"]).
-- keywords (list of strings): Broad descriptive terms (e.g., ["老师", "会议", "安静"]).
-- activity_name (string): Name of the event (e.g., "Meeting", "Dance Practice").
-- organizer_unit (string): The unit/department organizing the event.
-- contact_name (string): Name of the contact person.
-- contact_phone (string): Phone number.
-
-User Query: "${text}"
-Current Time: ${new Date().toISOString()}
-
-Return ONLY a valid JSON object. No markdown.
-Example format: {"date": "2023-10-27", "time_range": ["09:00", "11:00"], "capacity": 30, "facilities": ["投影仪", "电脑"], "keywords": ["教师"], "activity_name": "Class Meeting", "organizer_unit": "CS Dept", "contact_name": "John", "contact_phone": "12345678901"}`;
+        const prompt = buildParseIntentPrompt(text, new Date().toISOString(), this.parseIntentRules);
 
         try {
             const rawText = await this.callLlm(prompt);
             console.log(`[LLM Service] Raw Response (${this.provider}): ${rawText}`);
-            return this.extractJson<IntentResult>(rawText);
+            const parsed = this.extractJson<IntentResult>(rawText);
+            const building = this.extractBuildingKeyword(text);
+
+            if (!parsed.building && building) {
+                parsed.building = building;
+            }
+
+            if (parsed.building) {
+                const keywords = Array.isArray(parsed.keywords) ? parsed.keywords : [];
+                if (!keywords.some((item) => String(item).toLowerCase() === String(parsed.building).toLowerCase())) {
+                    parsed.keywords = [...keywords, parsed.building];
+                }
+            }
+
+            return parsed;
 
         } catch (error) {
             console.log(`[LLM Service] Error (${this.provider}): ${error}`);
@@ -220,14 +279,22 @@ Example format: {"date": "2023-10-27", "time_range": ["09:00", "11:00"], "capaci
             const phoneMatch = text.match(/(?:1[3-9]\d{9})|(?:0\d{2,3}-\d{7,8})/);
             if (phoneMatch) contact_phone = phoneMatch[0];
 
+            const building = this.extractBuildingKeyword(text);
+
             console.log('[Mock LLM Debug]', { activity_name, organizer_unit, contact_name, contact_phone });
+
+            const fallbackKeywords = [text];
+            if (building && !fallbackKeywords.includes(building)) {
+                fallbackKeywords.push(building);
+            }
 
             return {
                 date,
                 time_range,
                 capacity,
                 facilities: this.extractMockFacilities(text),
-                keywords: [text],
+                keywords: fallbackKeywords,
+                building,
                 type: detectedType,
                 activity_name,
                 organizer_unit,
@@ -240,21 +307,7 @@ Example format: {"date": "2023-10-27", "time_range": ["09:00", "11:00"], "capaci
     async auditProposal(text: string): Promise<AuditResult> {
         await this.initClient(); // Ensure fresh config
 
-        const prompt = `You are a risk audit AI for a university venue system.
-Analyze the following event proposal for safety and policy risks.
-
-Proposal: "${text}"
-
-Return ONLY a valid JSON object with:
-- score (integer 0-100, where 100 is high risk)
-- reason (short string explaining the score, MUST BE IN CHINESE)
-
-Criteria:
-- Alcohol, fire, large crowds, political sensitivity -> High Score (>70)
-- Study groups, small meetings, academic talk -> Low Score (<30)
-- Others -> Medium Score
-
-Do not include markdown code blocks.`;
+        const prompt = buildAuditPrompt(text, this.auditRules);
 
         try {
             const rawText = await this.callLlm(prompt);
@@ -268,6 +321,88 @@ Do not include markdown code blocks.`;
                 return { score: 85, reason: 'High risk keywords detected (fire/alcohol).' };
             }
             return { score: 10, reason: 'Low risk. Standard academic event.' };
+        }
+    }
+
+    private buildSearchCriteria(intent: IntentResult, assumptions: string[] = []): string[] {
+        const criteria: string[] = [];
+        const capacity = Number((intent as any)?.attendees_count || intent.capacity || 0);
+
+        if (intent.building) criteria.push(`楼栋:${intent.building}`);
+        if (capacity > 0) criteria.push(`人数≥${capacity}`);
+        if (intent.type) criteria.push(`类型:${intent.type}`);
+        if (Array.isArray(intent.facilities) && intent.facilities.length > 0) {
+            intent.facilities.slice(0, 3).forEach((item) => criteria.push(`设备:${item}`));
+        }
+        if (intent.date) criteria.push(`日期:${intent.date}`);
+        if (Array.isArray(intent.time_range) && intent.time_range.length === 2) {
+            criteria.push(`时段:${intent.time_range[0]}-${intent.time_range[1]}`);
+        }
+        assumptions.slice(0, 2).forEach((note) => criteria.push(`默认:${note}`));
+
+        return criteria.slice(0, 8);
+    }
+
+    async explainVenueSearch(input: VenueSearchExplainInput): Promise<VenueSearchInsight> {
+        await this.initClient();
+
+        const assumptions = Array.isArray(input.defaultAssumptions) ? input.defaultAssumptions : [];
+        const fallbackCriteria = this.buildSearchCriteria(input.intent || {}, assumptions);
+        const fallbackSummary = input.resultCount > 0
+            ? `已按你的条件筛选，找到 ${input.resultCount} 个候选场馆。`
+            : '当前条件下暂无可用场馆，可尝试放宽筛选条件。';
+        const fallbackTips = input.resultCount === 0
+            ? ['放宽人数或设备要求', '尝试更换时间段', '可去掉楼栋限制再试']
+            : (input.resultCount < 3 ? ['可放宽设备要求提高命中'] : []);
+
+        const compactResults = (input.topResults || []).slice(0, 5).map((item) => ({
+            name: item.name,
+            location: item.location,
+            capacity: item.capacity,
+            type: item.type,
+            score: item.score,
+            match_details: (item.match_details || []).slice(0, 4),
+        }));
+
+        const prompt = [
+            '你是高校场馆检索解释助手。',
+            '请根据输入生成简洁中文说明，必须只返回一个 JSON 对象，格式如下：',
+            '{"summary":"", "criteria":[""], "tips":[""]}',
+            '约束：',
+            '1) summary 20~60 字，说明“系统如何理解需求 + 当前结果数量”。',
+            '2) criteria 返回 2~8 条短语，例如“楼栋:明德楼”“人数≥60”。',
+            '3) tips 返回 0~3 条可执行建议；若结果充足可返回空数组。',
+            '4) 仅输出 JSON，不要任何解释文本。',
+            `原始查询: ${input.query || ''}`,
+            `解析意图: ${JSON.stringify(input.intent || {})}`,
+            `默认假设: ${JSON.stringify(assumptions)}`,
+            `结果数量: ${input.resultCount}`,
+            `Top结果: ${JSON.stringify(compactResults)}`,
+        ].join('\n\n');
+
+        try {
+            const raw = await this.callLlm(prompt);
+            const parsed = this.extractJson<VenueSearchInsight>(raw);
+            const summary = String(parsed?.summary || '').trim() || fallbackSummary;
+            const criteria = Array.isArray(parsed?.criteria)
+                ? parsed.criteria.map((item) => String(item).trim()).filter(Boolean).slice(0, 8)
+                : fallbackCriteria;
+            const tips = Array.isArray(parsed?.tips)
+                ? parsed.tips.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
+                : fallbackTips;
+
+            return {
+                summary,
+                criteria: criteria.length > 0 ? criteria : fallbackCriteria,
+                tips,
+            };
+        } catch (error) {
+            console.log(`[LLM Service] explainVenueSearch fallback (${this.provider}): ${error}`);
+            return {
+                summary: fallbackSummary,
+                criteria: fallbackCriteria,
+                tips: fallbackTips,
+            };
         }
     }
 }

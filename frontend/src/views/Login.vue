@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import api from '../api/axios'
 import { formatTime } from '../utils/formatters'
+import { hasGlobalNoticePopupShown, markGlobalNoticePopupShown } from '../utils/client-flags'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -110,8 +111,7 @@ const handlePasswordChange = async () => {
     
     // 更新用户信息
     const userRes = await api.get('/users/me')
-    authStore.user = userRes.data
-    localStorage.setItem('user', JSON.stringify(userRes.data))
+    authStore.setUser(userRes.data)
     
     // 获取公告并显示确认
     await fetchAnnouncementsAndShow()
@@ -126,6 +126,23 @@ const handlePasswordChange = async () => {
 const unreadNotifications = ref([])
 
 const fetchAnnouncementsAndShow = async () => {
+  const isAdminUser = authStore.isSysAdmin || authStore.isVenueAdmin
+  pendingRedirect.value = isAdminUser ? '/admin/dashboard' : '/student/overview'
+
+  // 管理员永不自动弹“系统通知与公告”弹窗
+  if (isAdminUser) {
+    ElMessage.success('登录成功')
+    router.push(pendingRedirect.value)
+    return
+  }
+
+  // 全局只自动弹一次（所有账号共享）
+  if (hasGlobalNoticePopupShown()) {
+    ElMessage.success('登录成功')
+    router.push(pendingRedirect.value)
+    return
+  }
+
   try {
     const res = await api.get('/announcements/')
     latestAnnouncements.value = res.data.slice(0, 3) // 显示最新3条
@@ -138,15 +155,10 @@ const fetchAnnouncementsAndShow = async () => {
     } catch (e) {
         console.error("Failed to fetch notifications", e)
     }
-    
-    // 确定重定向路径
-    if (authStore.isSysAdmin || authStore.isVenueAdmin) {
-      pendingRedirect.value = '/admin/dashboard'
-    } else {
-      pendingRedirect.value = '/student/dashboard'
-    }
-    
+
     if (latestAnnouncements.value.length > 0 || unreadNotifications.value.length > 0) {
+      // 自动弹窗时立即标记，后续登录不再自动弹
+      markGlobalNoticePopupShown()
       showAnnouncementDialog.value = true
     } else {
       // 没有公告直接跳转
@@ -159,7 +171,7 @@ const fetchAnnouncementsAndShow = async () => {
     if (authStore.isSysAdmin || authStore.isVenueAdmin) {
       router.push('/admin/dashboard')
     } else {
-      router.push('/student/dashboard')
+      router.push('/student/overview')
     }
   }
 }
@@ -303,6 +315,8 @@ const handleForgotPassword = async () => {
       title="系统通知与公告" 
       width="550px"
       :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
       :lock-scroll="false"
       class="glass-dialog announcement-dialog"
       align-center
@@ -424,7 +438,7 @@ const handleForgotPassword = async () => {
   box-shadow: none !important;
   border: 1px solid rgba(200, 200, 200, 0.2);
   border-radius: 12px;
-  transition: all 0.3s;
+  transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s;
   height: 48px;
 }
 
@@ -493,6 +507,26 @@ html.dark .login-hint {
   background: rgba(245, 245, 245, 0.5);
   border-radius: 12px;
   margin-bottom: 12px;
+  animation: login-notice-card-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.announcement-item:nth-child(2) { animation-delay: 40ms; }
+.announcement-item:nth-child(3) { animation-delay: 80ms; }
+.announcement-item:nth-child(4) { animation-delay: 120ms; }
+.announcement-item:nth-child(5) { animation-delay: 160ms; }
+.announcement-item:nth-child(6) { animation-delay: 200ms; }
+.announcement-item:nth-child(7) { animation-delay: 240ms; }
+.announcement-item:nth-child(8) { animation-delay: 280ms; }
+
+@keyframes login-notice-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .announcement-item:last-child {
@@ -516,6 +550,8 @@ html.dark .login-hint {
   font-size: 14px;
   color: #333;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .section-title {
@@ -532,6 +568,12 @@ html.dark .login-hint {
 
 .password-change-hint {
   margin-bottom: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .announcement-item {
+    animation: none;
+  }
 }
 </style>
 

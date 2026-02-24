@@ -13,7 +13,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../common/enums';
-import { LlmService } from '../llm/llm.service';
+import { IntentResult, LlmService } from '../llm/llm.service';
 import { parseVenueLocation } from './utils/location-utils';
 
 @Controller('venues')
@@ -75,64 +75,30 @@ export class VenuesController {
     @Get('search')
     @UseGuards(JwtAuthGuard)
     async search(@Query('q') q: string): Promise<VenueResponseDto[]> {
-        // 1. AI Parsing
-        const intent = await this.llmService.parseIntent(q);
+        return this.executeBasicSearch(q);
+    }
 
-        console.log(`AI Search Intent: ${JSON.stringify(intent)}`);
-
-        // 2. Build date/time from intent, with sensible fallback
-        const now = new Date();
-        let startDate: Date;
-        let endDate: Date;
-
-        if (intent.date && intent.time_range?.length === 2) {
-            const [startHM, endHM] = intent.time_range;
-            startDate = new Date(`${intent.date}T${startHM}:00`);
-            endDate = new Date(`${intent.date}T${endHM}:00`);
-            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate <= startDate) {
-                startDate = new Date(now);
-                startDate.setDate(startDate.getDate() + 1);
-                startDate.setHours(14, 0, 0, 0);
-                endDate = new Date(startDate);
-                endDate.setHours(startDate.getHours() + 2);
-            }
-        } else if (intent.date) {
-            startDate = new Date(`${intent.date}T08:00:00`);
-            endDate = new Date(`${intent.date}T22:00:00`);
-            if (isNaN(startDate.getTime())) {
-                startDate = new Date(now);
-                startDate.setDate(startDate.getDate() + 1);
-                startDate.setHours(8, 0, 0, 0);
-                endDate = new Date(startDate);
-                endDate.setHours(22, 0, 0, 0);
-            }
-        } else {
-            startDate = new Date(now);
-            startDate.setDate(startDate.getDate() + 1);
-            startDate.setHours(14, 0, 0, 0);
-            endDate = new Date(startDate);
-            endDate.setHours(startDate.getHours() + 2);
+    @Get('search-smart')
+    @UseGuards(JwtAuthGuard)
+    async searchSmart(@Query('q') q: string) {
+        try {
+            return await this.executeSmartSearch(q);
+        } catch (error: any) {
+            console.error('[search-smart] failed, fallback to basic search:', error?.message || error);
+            const results = await this.executeBasicSearch(q);
+            return {
+                query: String(q || '').trim(),
+                intent: {},
+                time_window: null,
+                defaults: ['智能解释链路异常，已降级为基础检索'],
+                insight: {
+                    summary: `已降级为基础检索，共 ${results.length} 条结果。`,
+                    criteria: [],
+                    tips: ['可稍后重试智能搜索'],
+                },
+                results,
+            };
         }
-
-        const capacity = intent.capacity || 1;
-        const facilities = intent.facilities || [];
-        const keywords = intent.keywords || [];
-        const venueType = intent.type;
-
-        const results = await this.venuesService.search(
-            capacity,
-            startDate,
-            endDate,
-            facilities,
-            keywords,
-            venueType
-        );
-
-        return results.map(item => ({
-            ...this.toResponseDto(item.venue),
-            match_details: item.matchDetails,
-            score: item.score
-        }));
     }
 
     @Get(':id')
@@ -259,6 +225,173 @@ export class VenuesController {
         return this.toResponseDto(updated);
     }
 
+    private resolveSearchWindow(intent: IntentResult): { startDate: Date; endDate: Date; defaults: string[] } {
+        const now = new Date();
+        const defaults: string[] = [];
+        let startDate: Date;
+        let endDate: Date;
+
+        if (intent.date && intent.time_range?.length === 2) {
+            const [startHM, endHM] = intent.time_range;
+            startDate = new Date(`${intent.date}T${startHM}:00`);
+            endDate = new Date(`${intent.date}T${endHM}:00`);
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate <= startDate) {
+                defaults.push('时间无效，已改为明天14:00-16:00');
+                startDate = new Date(now);
+                startDate.setDate(startDate.getDate() + 1);
+                startDate.setHours(14, 0, 0, 0);
+                endDate = new Date(startDate);
+                endDate.setHours(startDate.getHours() + 2);
+            }
+            return { startDate, endDate, defaults };
+        }
+
+        if (intent.date) {
+            startDate = new Date(`${intent.date}T08:00:00`);
+            endDate = new Date(`${intent.date}T22:00:00`);
+            if (isNaN(startDate.getTime())) {
+                defaults.push('日期无效，已改为明天14:00-16:00');
+                startDate = new Date(now);
+                startDate.setDate(startDate.getDate() + 1);
+                startDate.setHours(14, 0, 0, 0);
+                endDate = new Date(startDate);
+                endDate.setHours(startDate.getHours() + 2);
+            } else {
+                defaults.push('未指定时段，默认08:00-22:00');
+            }
+            return { startDate, endDate, defaults };
+        }
+
+        startDate = new Date(now);
+        startDate.setDate(startDate.getDate() + 1);
+        startDate.setHours(14, 0, 0, 0);
+        endDate = new Date(startDate);
+        endDate.setHours(startDate.getHours() + 2);
+        defaults.push('未指定时间，默认明天14:00-16:00');
+        return { startDate, endDate, defaults };
+    }
+
+    private async executeSmartSearch(rawQuery: string) {
+        const q = String(rawQuery || '').trim();
+        if (!q) {
+            return {
+                query: '',
+                intent: {},
+                time_window: null,
+                defaults: [],
+                insight: {
+                    summary: '请输入搜索需求，例如“明德楼60人教室”。',
+                    criteria: [],
+                    tips: ['可直接输入人数、楼栋、设备需求'],
+                },
+                results: [],
+            };
+        }
+
+        const intent = await this.llmService.parseIntent(q);
+        console.log(`AI Search Intent: ${JSON.stringify(intent)}`);
+
+        const { startDate, endDate, defaults } = this.resolveSearchWindow(intent);
+        const capacity = Math.max(1, Number((intent as any)?.attendees_count || intent.capacity || 1));
+        const facilities = Array.isArray(intent.facilities) ? intent.facilities : [];
+        const keywords = Array.isArray(intent.keywords) ? intent.keywords : [];
+        const venueType = intent.type;
+        const buildingName = (intent.building || '').trim() || undefined;
+
+        const results = await this.venuesService.search(
+            capacity,
+            startDate,
+            endDate,
+            facilities,
+            keywords,
+            venueType,
+            buildingName,
+        );
+
+        const mapped = results.map(item => ({
+            ...this.toResponseDto(item.venue),
+            match_details: item.matchDetails,
+            score: item.score,
+        }));
+
+        const insight = await this.llmService.explainVenueSearch({
+            query: q,
+            intent,
+            resultCount: mapped.length,
+            defaultAssumptions: defaults,
+            topResults: mapped.slice(0, 5).map((item) => ({
+                name: item.name,
+                location: item.location,
+                capacity: item.capacity,
+                type: item.type,
+                score: item.score,
+                match_details: item.match_details || [],
+            })),
+        });
+
+        return {
+            query: q,
+            intent,
+            time_window: {
+                start: startDate.toISOString(),
+                end: endDate.toISOString(),
+            },
+            defaults,
+            insight,
+            results: mapped,
+        };
+    }
+
+    private async executeBasicSearch(rawQuery: string): Promise<VenueResponseDto[]> {
+        const q = String(rawQuery || '').trim();
+        if (!q) return [];
+
+        const intent = await this.llmService.parseIntent(q);
+        const { startDate, endDate } = this.resolveSearchWindow(intent || {});
+        const capacity = Math.max(1, Number((intent as any)?.attendees_count || intent?.capacity || 1));
+        const facilities = Array.isArray(intent?.facilities) ? intent.facilities : [];
+        const keywords = Array.isArray(intent?.keywords) ? intent.keywords : [];
+        const venueType = intent?.type;
+        const buildingName = (intent?.building || '').trim() || undefined;
+
+        const results = await this.venuesService.search(
+            capacity,
+            startDate,
+            endDate,
+            facilities,
+            keywords,
+            venueType,
+            buildingName,
+        );
+
+        return results.map(item => ({
+            ...this.toResponseDto(item.venue),
+            match_details: item.matchDetails,
+            score: item.score,
+        }));
+    }
+
+    private normalizeFacilities(rawFacilities: any): string[] {
+        if (Array.isArray(rawFacilities)) {
+            return rawFacilities.map((item) => String(item)).filter(Boolean);
+        }
+        if (typeof rawFacilities === 'string') {
+            try {
+                const parsed = JSON.parse(rawFacilities);
+                if (Array.isArray(parsed)) {
+                    return parsed.map((item) => String(item)).filter(Boolean);
+                }
+            } catch {
+                // ignore invalid JSON and fallback to separator split
+            }
+            return rawFacilities
+                .split(/[，,]/)
+                .map((item) => item.trim())
+                .filter(Boolean);
+        }
+        return [];
+    }
+
     private toResponseDto(venue: any): VenueResponseDto {
         const parsedLocation = parseVenueLocation(venue.location, venue.name);
         return {
@@ -271,7 +404,7 @@ export class VenuesController {
             floor_label: venue.floorLabel || parsedLocation.floorLabel,
             room_name: venue.roomCode || parsedLocation.roomName,
             room_code: venue.roomCode || parsedLocation.roomName,
-            facilities: typeof venue.facilities === 'string' ? JSON.parse(venue.facilities) : venue.facilities,
+            facilities: this.normalizeFacilities(venue.facilities),
             status: venue.status,
             image_url: venue.imageUrl,
             photos: Array.isArray(venue.photos) ? venue.photos : [],

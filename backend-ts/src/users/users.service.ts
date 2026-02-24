@@ -6,6 +6,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserRole } from '../common/enums';
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class UsersService {
@@ -89,6 +90,7 @@ export class UsersService {
         if (typeof updateUserDto.password === 'string' && updateUserDto.password.trim() !== '') {
             const saltRounds = 10;
             user.hashedPassword = await bcrypt.hash(updateUserDto.password, saltRounds);
+            user.loginSessionId = randomUUID();
         }
 
         if (Object.prototype.hasOwnProperty.call(updateUserDto, 'contact_info')) {
@@ -141,6 +143,7 @@ export class UsersService {
         const saltRounds = 10;
         user.hashedPassword = await bcrypt.hash(identityLast6, saltRounds);
         user.isFirstLogin = true;
+        user.loginSessionId = randomUUID();
         return this.userRepository.save(user);
     }
 

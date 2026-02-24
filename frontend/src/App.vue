@@ -24,9 +24,15 @@ body {
   color: var(--text-primary);
 }
 #app {
+  position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100dvh;
   min-height: 100dvh;
   overflow: hidden;
+}
+#app > :not(.dark-bg-layer) {
+  position: relative;
+  z-index: 1;
 }
 </style>

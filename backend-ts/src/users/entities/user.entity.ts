@@ -36,6 +36,9 @@ export class User {
     @Column({ name: 'managed_floor', nullable: true })
     managedFloor: string;
 
+    @Column({ name: 'login_session_id', nullable: true, default: '' })
+    loginSessionId: string;
+
     @OneToMany(() => Venue, (venue) => venue.admin)
     venuesManaged: Venue[];
 

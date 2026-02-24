@@ -12,6 +12,13 @@ const users = ref([])
 const venues = ref([])
 const keyword = ref('')
 const roleFilter = ref('')
+const roleOrder = ['sys_admin', 'venue_admin', 'floor_admin', 'student_teacher']
+const roleGroupMeta = {
+    sys_admin: { label: '系统管理员', note: '全局配置与安全管理' },
+    venue_admin: { label: '场馆管理员', note: '场馆维护与资源调度' },
+    floor_admin: { label: '楼层管理员', note: '楼栋/楼层范围管理' },
+    student_teacher: { label: '师生用户', note: '发起预约与查看审批' },
+}
 
 const fetchUsers = async () => {
     try {
@@ -188,6 +195,45 @@ const filteredUsers = computed(() => {
     })
 })
 
+const visibleRoles = computed(() => {
+    const roles = roleFilter.value ? [roleFilter.value] : roleOrder
+    return roles.filter((role) => roleOrder.includes(role))
+})
+
+const groupedFilteredUsers = computed(() => {
+    const grouped = new Map(roleOrder.map((role) => [role, []]))
+    filteredUsers.value.forEach((user) => {
+        if (!grouped.has(user.role)) {
+            grouped.set(user.role, [])
+        }
+        grouped.get(user.role).push(user)
+    })
+
+    return visibleRoles.value
+        .map((role) => ({
+            role,
+            label: roleGroupMeta[role]?.label || getRoleLabel(role),
+            note: roleGroupMeta[role]?.note || '',
+            users: (grouped.get(role) || []).slice().sort((a, b) => Number(a.id) - Number(b.id)),
+        }))
+})
+
+const expandedRoleGroups = ref([])
+
+const isRoleGroupExpanded = (role) => expandedRoleGroups.value.includes(role)
+
+const toggleRoleGroup = (role) => {
+    if (isRoleGroupExpanded(role)) {
+        expandedRoleGroups.value = expandedRoleGroups.value.filter((item) => item !== role)
+        return
+    }
+    expandedRoleGroups.value = [...expandedRoleGroups.value, role]
+}
+
+watch(visibleRoles, (roles) => {
+    expandedRoleGroups.value = expandedRoleGroups.value.filter((role) => roles.includes(role))
+}, { immediate: true })
+
 // 创建用户
 const showCreateModal = ref(false)
 const createForm = ref({
@@ -297,29 +343,49 @@ const submitCreate = async () => {
         </div>
 
         <div class="user-pill-list">
-            <div v-for="user in filteredUsers" :key="user.id" class="user-pill-row">
-                <div class="user-pill-info">
-                    <span class="user-name">{{ user.username }}</span>
-                    <span class="user-id">#{{ user.id }}</span>
-                    <el-tag size="small" :type="getRoleType(user.role)">{{ getRoleLabel(user.role) }}</el-tag>
-                    <el-tag v-if="user.is_first_login" size="small" type="warning">首次登录</el-tag>
-                    <el-tag v-else size="small" type="success">正常</el-tag>
-                    <span v-if="user.role === 'venue_admin'" class="managed-pill">
-                        管辖场馆：{{ getManagedVenues(user.id) }}
-                    </span>
-                    <span v-if="isScopedRole(user.role)" class="managed-pill">
-                        权限范围：{{ getManagedScope(user) }}
-                    </span>
-                    <span class="managed-pill managed-pill--credential">
-                        应急密码：{{ user.identity_last6 || '未配置' }}
-                    </span>
-                </div>
-                <div class="user-pill-actions">
-                    <el-button size="small" type="primary" plain :icon="Edit" @click="openEdit(user)">编辑</el-button>
-                    <el-button size="small" type="info" plain :icon="Message" @click="openNotify(user)">通知</el-button>
-                    <el-button size="small" type="warning" plain @click="resetPasswordToIdentity(user)">重置为后六位</el-button>
-                </div>
-            </div>
+            <section
+                v-for="group in groupedFilteredUsers"
+                :key="group.role"
+                class="user-role-group"
+                :class="{ 'is-open': isRoleGroupExpanded(group.role) }"
+            >
+                <button type="button" class="user-role-group__head user-role-group__head--button" @click="toggleRoleGroup(group.role)">
+                    <div class="user-role-group__title-wrap">
+                        <div class="user-role-group__title">{{ group.label }}</div>
+                        <div class="user-role-group__meta">{{ group.note }} · {{ group.users.length }} 人</div>
+                    </div>
+                    <span class="user-role-group__arrow" :class="{ 'is-open': isRoleGroupExpanded(group.role) }">▾</span>
+                </button>
+
+                <transition name="group-collapse">
+                    <div v-if="isRoleGroupExpanded(group.role)" class="user-role-group__body">
+                        <el-empty v-if="group.users.length === 0" description="该分类暂无符合条件的用户" />
+                        <div v-for="user in group.users" :key="user.id" class="user-pill-row">
+                            <div class="user-pill-info">
+                                <span class="user-name">{{ user.username }}</span>
+                                <span class="user-id">#{{ user.id }}</span>
+                                <el-tag size="small" :type="getRoleType(user.role)">{{ getRoleLabel(user.role) }}</el-tag>
+                                <el-tag v-if="user.is_first_login" size="small" type="warning">首次登录</el-tag>
+                                <el-tag v-else size="small" type="success">正常</el-tag>
+                                <span v-if="user.role === 'venue_admin'" class="managed-pill">
+                                    管辖场馆：{{ getManagedVenues(user.id) }}
+                                </span>
+                                <span v-if="isScopedRole(user.role)" class="managed-pill">
+                                    权限范围：{{ getManagedScope(user) }}
+                                </span>
+                                <span class="managed-pill managed-pill--credential">
+                                    应急密码：{{ user.identity_last6 || '未配置' }}
+                                </span>
+                            </div>
+                            <div class="user-pill-actions">
+                                <el-button size="small" type="primary" plain :icon="Edit" @click="openEdit(user)">编辑</el-button>
+                                <el-button size="small" type="info" plain :icon="Message" @click="openNotify(user)">通知</el-button>
+                                <el-button size="small" type="warning" plain @click="resetPasswordToIdentity(user)">重置为后六位</el-button>
+                            </div>
+                        </div>
+                    </div>
+                </transition>
+            </section>
         </div>
         <el-empty v-if="filteredUsers.length === 0" description="没有符合条件的用户" />
 
@@ -446,7 +512,96 @@ const submitCreate = async () => {
 .user-pill-list {
     display: flex;
     flex-direction: column;
+    gap: 14px;
+}
+
+.user-role-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-radius: 18px;
+    padding: 10px;
+    background: var(--glass-surface-bg);
+    border: 1px solid var(--glass-surface-border);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
+}
+
+.user-role-group.is-open {
+    background: var(--glass-surface-bg-strong);
+}
+
+.user-role-group__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px;
+}
+
+.user-role-group__head--button {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+}
+
+.user-role-group__title-wrap {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.user-role-group__title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.user-role-group__meta {
+    font-size: 11px;
+    opacity: 0.68;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-role-group__arrow {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.6);
+    transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.user-role-group__arrow.is-open {
+    transform: rotate(180deg);
+}
+
+html.dark .user-role-group__arrow {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.user-role-group__body {
+    display: flex;
+    flex-direction: column;
     gap: 10px;
+}
+
+.group-collapse-enter-active,
+.group-collapse-leave-active {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.group-collapse-enter-from,
+.group-collapse-leave-to {
+    opacity: 0;
+    transform: translateY(-6px);
 }
 
 .user-pill-row {
@@ -462,6 +617,8 @@ const submitCreate = async () => {
     -webkit-backdrop-filter: blur(24px) saturate(155%);
     border: 1px solid var(--glass-surface-border);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+    content-visibility: auto;
+    contain-intrinsic-size: 76px;
 }
 
 .user-pill-info {
@@ -533,6 +690,18 @@ html.dark .managed-pill {
 }
 
 @media (max-width: 768px) {
+    .user-role-group__head {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+    }
+
+    .user-role-group__head--button {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+
     .user-pill-row {
         border-radius: 14px;
         padding: 10px;

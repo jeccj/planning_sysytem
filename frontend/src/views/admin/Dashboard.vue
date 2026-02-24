@@ -304,7 +304,7 @@ const fetchLatestAnnouncement = async () => {
         const res = await api.get('/announcements/latest')
         latestAnnouncement.value = res.data
     } catch (e) {
-        if (e?.response?.status !== 404) {
+        if (e?.response?.status !== 404 && e?.response?.status !== 401) {
             ElMessage.error('获取公告失败')
         }
         latestAnnouncement.value = null
@@ -533,7 +533,7 @@ const goToAnnouncements = () => {
     justify-content: space-between;
     position: relative;
     cursor: default;
-    transition: all 0.3s;
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .stat-pill:hover {
@@ -622,6 +622,9 @@ const goToAnnouncements = () => {
     font-weight: 600;
     font-size: 15px;
     color: #1d1d1f;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .notice-time {
@@ -634,6 +637,10 @@ const goToAnnouncements = () => {
     color: #1d1d1f;
     opacity: 0.75;
     line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 /* Glass Panel helper for Cards - MATCHING SIDEBAR */
@@ -780,6 +787,9 @@ const goToAnnouncements = () => {
     font-weight: 500;
     font-size: 14px;
     color: #1d1d1f;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .act-meta {
     font-size: 12px;
@@ -796,7 +806,8 @@ const goToAnnouncements = () => {
 
 .delete-btn {
     opacity: 0;
-    transition: all 0.3s;
+    transform: translateY(4px);
+    transition: opacity 0.24s ease, transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.24s ease;
     background: rgba(255, 255, 255, 0.5) !important;
     border: none !important;
     color: #f56c6c !important;
@@ -804,6 +815,7 @@ const goToAnnouncements = () => {
 
 .activity-item:hover .delete-btn {
     opacity: 1;
+    transform: translateY(0);
 }
 
 html.dark .delete-btn {
@@ -825,7 +837,7 @@ html.dark .delete-btn {
     background: rgba(255,255,255,0.4); 
     cursor: pointer;
     font-weight: 500;
-    transition: all 0.2s;
+    transition: background-color 0.24s ease, color 0.24s ease, transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease;
     text-align: center;
     flex: 1;
     margin: 0 8px;

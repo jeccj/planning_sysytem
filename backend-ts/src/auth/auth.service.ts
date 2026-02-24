@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { TokenResponseDto } from './dto/token-response.dto';
 
@@ -44,7 +45,10 @@ export class AuthService {
     }
 
     async login(user: User): Promise<TokenResponseDto> {
-        const payload = { sub: user.id, username: user.username, role: user.role };
+        const sessionId = randomUUID();
+        user.loginSessionId = sessionId;
+        await this.userRepository.save(user);
+        const payload = { sub: user.id, username: user.username, role: user.role, sid: sessionId };
 
         return {
             access_token: this.jwtService.sign(payload),
@@ -69,8 +73,17 @@ export class AuthService {
 
         user.hashedPassword = await this.hashPassword(newPassword);
         user.isFirstLogin = false;
+        user.loginSessionId = randomUUID();
 
         return this.userRepository.save(user);
+    }
+
+    async verifyPassword(userId: number, password: string): Promise<boolean> {
+        const user = await this.userRepository.findOne({ where: { id: userId } });
+        if (!user) {
+            throw new Error('User not found');
+        }
+        return this.validatePassword(password, user.hashedPassword);
     }
 
     async forgotPasswordByIdentity(username: string, identityLast6: string, newPassword: string): Promise<void> {
@@ -93,6 +106,7 @@ export class AuthService {
 
         user.hashedPassword = await this.hashPassword(newPassword);
         user.isFirstLogin = true;
+        user.loginSessionId = randomUUID();
         await this.userRepository.save(user);
     }
 }

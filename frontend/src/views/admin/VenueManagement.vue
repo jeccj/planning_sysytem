@@ -631,7 +631,7 @@ const openBuildingDetail = (buildingName) => {
                 >
                   <el-icon><Plus /></el-icon>
                 </el-upload>
-                <el-dialog v-model="previewVisible" title="预览" width="600px" append-to-body align-center>
+                <el-dialog v-model="previewVisible" title="预览" width="600px" class="glass-dialog" append-to-body align-center>
                   <img :src="previewUrl" style="width: 100%" alt="预览" />
                 </el-dialog>
             </el-form-item>

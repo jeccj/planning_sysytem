@@ -34,6 +34,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             throw new UnauthorizedException('User not found');
         }
 
+        const tokenSessionId = String(payload?.sid || '');
+        const currentSessionId = String(user.loginSessionId || '');
+        if (!tokenSessionId || tokenSessionId !== currentSessionId) {
+            throw new UnauthorizedException('登录状态已失效，请重新登录');
+        }
+
         return user;
     }
 }

@@ -471,6 +471,7 @@ export class VenuesService {
         facilities?: string[],
         keywords?: string[],
         venueType?: string,
+        buildingName?: string,
     ): Promise<{ venue: Venue; matchDetails: string[]; score: number }[]> {
         const queryBuilder = this.venueRepository.createQueryBuilder('venue');
 
@@ -483,6 +484,13 @@ export class VenuesService {
 
         if (venueType) {
             queryBuilder.andWhere('venue.type = :venueType', { venueType });
+        }
+
+        if (buildingName) {
+            queryBuilder.andWhere('(venue.building_name = :buildingName OR venue.location LIKE :buildingLike)', {
+                buildingName,
+                buildingLike: `%${buildingName}%`,
+            });
         }
 
         // Filter out non-available venues (including Maintenance)
@@ -547,6 +555,16 @@ export class VenuesService {
             const typeKeywords = ['教室', '实验室', '礼堂', 'hall', 'lab', 'classroom', 'lecture'];
             if (typeKeywords.some(term => searchableText.includes(term))) {
                 score += 5;
+            }
+
+            if (buildingName) {
+                const venueBuilding = String(venue.buildingName || '').toLowerCase();
+                const matchedBuilding = venueBuilding.includes(String(buildingName).toLowerCase())
+                    || String(venue.location || '').toLowerCase().includes(String(buildingName).toLowerCase());
+                if (matchedBuilding) {
+                    score += 10;
+                    matchDetails.push(`✅ 楼栋匹配: ${buildingName}`);
+                }
             }
 
             // 4. Availability Filter - Check Intersection

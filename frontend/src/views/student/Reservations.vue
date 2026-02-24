@@ -382,7 +382,10 @@ const openDetail = (reservation) => {
             0 2px 8px rgba(0, 0, 0, 0.04),
             inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
             
-        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+            box-shadow 0.32s ease,
+            border-color 0.32s ease,
+            background 0.32s ease;
     }
     
     /* Hover lift effect */
@@ -478,7 +481,7 @@ const openDetail = (reservation) => {
         flex: 1;
         border-radius: 12px !important;
         font-weight: 500;
-        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease, background-color 0.24s ease, color 0.24s ease;
     }
     
     .card-actions .el-button:hover {
@@ -496,6 +499,13 @@ const openDetail = (reservation) => {
     
     .detail-item.rejection {
         grid-column: span 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .reservation-card,
+    .card-actions .el-button {
+        transition: none !important;
     }
 }
 

@@ -1,10 +1,11 @@
 <script setup>
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import api from '../api/axios'
 import { ElMessage } from 'element-plus'
 import { formatTime } from '../utils/formatters'
+import { hasGlobalNoticePopupShown, markGlobalNoticePopupShown } from '../utils/client-flags'
 import {
   Menu as IconMenu,
   Setting,
@@ -14,7 +15,8 @@ import {
   CircleCheck,
   Bell,
   Operation,
-  ArrowDown
+  ArrowDown,
+  Search
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -25,6 +27,7 @@ const authStore = useAuthStore()
 
 const activeMenu = computed(() => route.path)
 const userRole = computed(() => authStore.user?.role)
+const isAdminUser = computed(() => ['sys_admin', 'venue_admin', 'floor_admin'].includes(userRole.value))
 const showLlmStatusIsland = computed(() => true)
 const hasManagedScope = computed(() => {
     const building = (authStore.user?.managed_building || '').trim()
@@ -52,6 +55,50 @@ const isViewportResizing = ref(false)
 let resizeIdleTimer = null
 const isBottomRail = ref(false)
 const isAsideExpanded = ref(false)
+const mainContentRef = ref(null)
+const isMainContentScrolling = ref(false)
+let mainScrollIdleTimer = null
+let mainScrollRafId = null
+
+const getMainContentEl = () => {
+    const target = mainContentRef.value
+    if (!target) return null
+    return target.$el || target
+}
+
+const handleMainContentScroll = () => {
+    if (mainScrollRafId !== null) return
+    mainScrollRafId = window.requestAnimationFrame(() => {
+        isMainContentScrolling.value = true
+        if (mainScrollIdleTimer) {
+            clearTimeout(mainScrollIdleTimer)
+        }
+        mainScrollIdleTimer = setTimeout(() => {
+            isMainContentScrolling.value = false
+            mainScrollIdleTimer = null
+        }, 110)
+        mainScrollRafId = null
+    })
+}
+
+const cancelMainScrollRaf = () => {
+    if (mainScrollRafId !== null) {
+        window.cancelAnimationFrame(mainScrollRafId)
+        mainScrollRafId = null
+    }
+}
+
+const bindMainContentScroll = () => {
+    const el = getMainContentEl()
+    if (!el) return
+    el.addEventListener('scroll', handleMainContentScroll, { passive: true })
+}
+
+const unbindMainContentScroll = () => {
+    const el = getMainContentEl()
+    if (!el) return
+    el.removeEventListener('scroll', handleMainContentScroll)
+}
 
 const isPhoneDevice = () => {
     if (typeof window === 'undefined') return false
@@ -181,6 +228,10 @@ onMounted(() => {
     handleViewportResize()
     window.addEventListener('resize', handleViewportResize, { passive: true })
     window.addEventListener('orientationchange', handleViewportResize)
+
+    nextTick(() => {
+        bindMainContentScroll()
+    })
 })
 
 watch(
@@ -204,6 +255,12 @@ onUnmounted(() => {
         clearTimeout(resizeIdleTimer)
         resizeIdleTimer = null
     }
+    if (mainScrollIdleTimer) {
+        clearTimeout(mainScrollIdleTimer)
+        mainScrollIdleTimer = null
+    }
+    cancelMainScrollRaf()
+    unbindMainContentScroll()
     window.removeEventListener('resize', handleViewportResize)
     window.removeEventListener('orientationchange', handleViewportResize)
 })
@@ -229,8 +286,11 @@ const pageTitle = computed(() => {
     if (p.includes('/admin/announcements')) return '公告管理'
     if (p.includes('/admin/settings')) return '系统设置'
     if (p.includes('/announcements')) return '公告中心'
-    if (p.includes('/student/dashboard')) return '场馆查询'
-    if (p.includes('/student/reservations')) return '我的预约'
+    if (p.includes('/student/overview')) return '总览'
+    if (p.includes('/student/venues')) return '场馆'
+    if (p.includes('/student/search')) return '搜索'
+    if (p.includes('/student/reservations')) return '预约'
+    if (p.includes('/student/dashboard')) return '总览'
     return '控制台'
 })
 
@@ -242,41 +302,23 @@ const userRoleLabel = computed(() => {
     return '师生用户'
 })
 
-const getNoticeSeenStorageKey = () => {
-    const userId = authStore.user?.id
-    if (!userId) return 'noticeSeenId:anonymous'
-    return `noticeSeenId:user:${userId}`
-}
-
-const getSeenAnnouncementId = () => {
-    const key = getNoticeSeenStorageKey()
-    return localStorage.getItem(key) || ''
-}
-
-const setSeenAnnouncementId = (announcementId) => {
-    const key = getNoticeSeenStorageKey()
-    localStorage.setItem(key, String(announcementId))
-}
-
 const handleNoticeConfirm = () => {
     showNotice.value = false
-    if (latestAnnouncement.value?.id) {
-        setSeenAnnouncementId(latestAnnouncement.value.id)
-    }
+    markGlobalNoticePopupShown()
 }
 
 const fetchLatestAnnouncement = async () => {
     try {
         const res = await api.get('/announcements/latest')
         latestAnnouncement.value = res.data
-        let shownId = getSeenAnnouncementId()
-        // Backward compatibility for old session marker
-        const legacyShownId = sessionStorage.getItem('noticeShownId')
-        if (!shownId && legacyShownId) {
-            setSeenAnnouncementId(legacyShownId)
-            shownId = legacyShownId
+        // 管理员永不自动弹公告/通知弹窗
+        if (isAdminUser.value) {
+            showNotice.value = false
+            return
         }
-        if (!shownId || shownId !== String(res.data.id)) {
+        // 全局只自动弹一次（所有账号共享）
+        if (!hasGlobalNoticePopupShown() && res?.data?.id) {
+            markGlobalNoticePopupShown()
             showNotice.value = true
         }
     } catch (e) {
@@ -326,7 +368,11 @@ const handleLogout = () => {
 </script>
 
 <template>
-  <div class="common-layout" :class="{ 'is-resizing': isViewportResizing }" @click="closeFloatingPanels">
+  <div
+    class="common-layout"
+    :class="{ 'is-resizing': isViewportResizing, 'is-scrolling': isMainContentScrolling }"
+    @click="closeFloatingPanels"
+  >
     <el-container class="layout-container">
       <el-aside
         width="auto"
@@ -334,7 +380,6 @@ const handleLogout = () => {
           'aside-menu',
           {
             'aside-menu--bottom': isBottomRail,
-            'aside-menu--compact': userRole === 'student_teacher',
             'aside-menu--expanded': isAsideExpanded
           }
         ]"
@@ -350,10 +395,19 @@ const handleLogout = () => {
         >
           <!-- Student Menu -->
           <template v-if="userRole === 'student_teacher'">
-
-            <el-menu-item index="/student/dashboard">
+            <el-menu-item index="/student/overview">
               <el-icon><House /></el-icon>
-              <span>查询</span>
+              <span>总览</span>
+            </el-menu-item>
+
+            <el-menu-item index="/student/venues">
+              <el-icon><Operation /></el-icon>
+              <span>场馆</span>
+            </el-menu-item>
+
+            <el-menu-item index="/student/search">
+              <el-icon><Search /></el-icon>
+              <span>搜索</span>
             </el-menu-item>
             
             <el-menu-item index="/student/reservations">
@@ -481,7 +535,7 @@ const handleLogout = () => {
           </div>
         </el-header>
         
-        <el-main class="main-content">
+        <el-main ref="mainContentRef" class="main-content">
           <div class="content-shell">
             <router-view v-slot="{ Component }">
                <transition name="fade" mode="out-in">
@@ -541,7 +595,7 @@ const handleLogout = () => {
 .layout-container {
   --rail-left-gap: clamp(12px, 1.8vw, 24px);
   --rail-collapsed-width: clamp(60px, 5.4vw, 72px);
-  --rail-expanded-width: clamp(192px, 18vw, 236px);
+  --rail-expanded-width: clamp(150px, 12vw, 178px);
   --rail-item-size: clamp(46px, 4.3vw, 52px);
   --rail-offset-left: calc(var(--rail-left-gap) + var(--rail-collapsed-width) + clamp(14px, 1.9vw, 30px));
   height: 100dvh;
@@ -565,6 +619,8 @@ const handleLogout = () => {
 
 .notice-content {
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .notice-empty {
@@ -851,7 +907,7 @@ html.dark .aside-menu.aside-menu--bottom :deep(.el-menu-item.is-active) {
     height: 8px;
     border-radius: 50%;
     background: #ccc;
-    transition: all 0.5s;
+    transition: background-color 0.4s ease, box-shadow 0.4s ease;
     box-shadow: 0 0 10px rgba(0,0,0,0.1);
 }
 
@@ -876,13 +932,13 @@ html.dark .status-text { color: #eee; }
 
 .aside-menu:hover .el-menu-vertical {
     align-items: stretch; /* Stretch items to fill width on expansion */
-    padding: 0 clamp(8px, 1.1vw, 12px); /* Add internal padding when expanded */
+    padding: 0 clamp(6px, 0.9vw, 10px); /* Add internal padding when expanded */
     box-sizing: border-box;
 }
 
 .aside-menu.aside-menu--expanded .el-menu-vertical {
     align-items: stretch;
-    padding: 0 clamp(8px, 1.1vw, 12px);
+    padding: 0 clamp(6px, 0.9vw, 10px);
     box-sizing: border-box;
 }
 
@@ -956,6 +1012,9 @@ html.dark .status-text { color: #eee; }
     font-weight: 600;
     opacity: 0.72;
     white-space: nowrap;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .user-menu-island {
@@ -1051,8 +1110,7 @@ html.dark .menu-item:hover {
 .notification-panel.island-pop-enter-from,
 .notification-panel.island-pop-leave-to {
     opacity: 0;
-    transform: translateX(10px) scale(0.96);
-    filter: blur(4px);
+    transform: translateX(8px) scale(0.98);
 }
 
 /* Rotation for arrow */
@@ -1069,7 +1127,7 @@ html.dark .menu-item:hover {
     position: absolute;
     top: 46px;
     right: calc(100% + 8px);
-    width: 300px;
+    width: min(320px, calc(100vw - 24px));
     max-height: 400px;
     padding: 0 !important;
     overflow: hidden;
@@ -1180,18 +1238,17 @@ html.dark .notification-content {
 
 /* Island Pop Animation (Apple Spring) */
 .island-pop-enter-active {
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.36s cubic-bezier(0.22, 1, 0.36, 1), transform 0.36s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .island-pop-leave-active {
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .island-pop-enter-from,
 .island-pop-leave-to {
   opacity: 0;
-  transform: translateY(-10px) scale(0.9);
-  filter: blur(10px);
+  transform: translateY(-8px) scale(0.98);
 }
 
 /* Glass Pills (The Islands) Style */
@@ -1212,7 +1269,11 @@ html.dark .notification-content {
     padding: 10px 24px; /* More padding */
     display: flex;
     align-items: center;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transition:
+        background 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .glass-pill:hover {
@@ -1356,6 +1417,7 @@ html.dark .mobile-orientation-text {
   height: 100dvh;
   min-height: 100dvh;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .content-shell {
@@ -1369,6 +1431,7 @@ html.dark .mobile-orientation-text {
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.1);
     position: relative;
     overflow: hidden;
+    contain: layout paint;
 }
 
 html.dark .content-shell {
@@ -1436,7 +1499,7 @@ html.dark .content-shell {
     min-width: var(--rail-item-size);
     text-align: center;
     margin: 0;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), color 0.24s ease;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -1448,7 +1511,7 @@ html.dark .content-shell {
     width: 0;
     white-space: nowrap;
     transform: translateX(-10px);
-    transition: all 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transition: opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1), transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
     display: inline-block;
 }
 
@@ -1709,6 +1772,26 @@ html.dark :deep(.el-menu-item.is-active) {
 
 }
 
+@media (max-width: 768px) and (orientation: portrait) {
+    .user-menu-island {
+        right: 0;
+        top: calc(100% + 6px);
+        transform-origin: top right;
+    }
+
+    .notification-panel {
+        right: 0;
+        left: auto;
+        top: calc(100% + 58px);
+        width: min(300px, calc(100vw - 20px));
+    }
+
+    .user-menu-island.island-pop-enter-from,
+    .user-menu-island.island-pop-leave-to {
+        transform: translateY(-8px) scale(0.96);
+    }
+}
+
 @media (max-height: 520px) and (orientation: landscape) and (max-width: 980px) {
     .aside-menu.aside-menu--bottom {
         bottom: clamp(6px, 2.2vh, 12px);
@@ -1789,6 +1872,12 @@ html.dark :deep(.el-menu-item.is-active) {
     transition: none !important;
 }
 
+.common-layout.is-scrolling .content-shell {
+    backdrop-filter: blur(10px) saturate(120%) !important;
+    -webkit-backdrop-filter: blur(10px) saturate(120%) !important;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08) !important;
+}
+
 /* Bottom rail lock: keep labels visible and prevent desktop-rail hover rules from distorting layout */
 .aside-menu.aside-menu--bottom:hover .el-menu-vertical,
 .aside-menu.aside-menu--bottom.aside-menu--expanded .el-menu-vertical {
@@ -1810,5 +1899,24 @@ html.dark :deep(.el-menu-item.is-active) {
     width: auto !important;
     margin-left: 0 !important;
     transform: translateY(1px) !important;
+}
+
+@media (hover: none), (pointer: coarse) {
+    .content-shell {
+        backdrop-filter: blur(14px) saturate(128%);
+        -webkit-backdrop-filter: blur(14px) saturate(128%);
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.1);
+    }
+
+    .glass-pill {
+        backdrop-filter: blur(14px) saturate(132%);
+        -webkit-backdrop-filter: blur(14px) saturate(132%);
+    }
+
+    .aside-menu,
+    .aside-menu.aside-menu--bottom {
+        backdrop-filter: blur(18px) saturate(135%);
+        -webkit-backdrop-filter: blur(18px) saturate(135%);
+    }
 }
 </style>

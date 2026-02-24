@@ -1,6 +1,6 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import SmartSearch from '../../components/SmartSearch.vue'
 import api from '../../api/axios'
@@ -8,10 +8,11 @@ import { ElMessage } from 'element-plus'
 import { ArrowRight, Filter, View, Location, Clock, DataAnalysis } from '@element-plus/icons-vue'
 import VenueCard from '../../components/VenueCard.vue'
 import { formatTime, getNoticePreview, getVenueBuildingName, isUserDismiss } from '../../utils/formatters'
+import { hasSearchDemoAutoShown, markSearchDemoAutoShown } from '../../utils/client-flags'
 
 const authStore = useAuthStore()
 const router = useRouter()
-const activeTab = ref('browse')
+const route = useRoute()
 const venues = ref([])
 const allVenues = ref([])
 const latestAnnouncement = ref(null)
@@ -152,6 +153,243 @@ const buildingOptions = computed(() => {
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-CN'))
 })
 
+const currentSection = computed(() => {
+    const p = route.path
+    if (p.includes('/student/venues')) return 'all-venues'
+    if (p.includes('/student/search')) return 'search'
+    return 'overview'
+})
+
+const searchInsight = ref({
+    summary: '',
+    criteria: [],
+    tips: [],
+})
+const showMoreMatches = ref(false)
+const searchInput = ref('')
+const showSearchDemoDialog = ref(false)
+const searchDemoPlaying = ref(false)
+const searchDemoTempDismissed = ref(false)
+const demoCurrentStep = ref(1)
+const demoTypedQuery = ref('')
+const demoShowBestResult = ref(false)
+const demoShowAutofill = ref(false)
+const demoKeywordBubbleReady = ref(false)
+const demoSourceDisintegrating = ref(false)
+const demoKeywordSplitRunId = ref(0)
+const demoCondensePhase = ref('idle')
+const demoCondenseRunId = ref(0)
+const demoBreakdownPhase = ref('idle')
+const demoBreakdownRunId = ref(0)
+const demoRunToken = ref(0)
+
+const searchDemoPreset = Object.freeze({
+    query: '我要办“数据结构复习会”，主办单位是计算机学院，联系人张敏13800138000，明天下午在明德楼找可容纳60人的教室，需要投影仪和白板，活动2小时。',
+    intentFlows: [
+        { keyword: '数据结构复习会', label: '活动', value: '数据结构复习会', tag: '活动：数据结构复习会' },
+        { keyword: '计算机学院', label: '主办', value: '计算机学院', tag: '主办单位：计算机学院' },
+        { keyword: '张敏13800138000', label: '联系', value: '张敏（13800138000）', tag: '联系人：张敏（13800138000）' },
+        { keyword: '明德楼', label: '楼栋', value: '明德楼', tag: '楼栋：明德楼' },
+        { keyword: '60人', label: '人数', value: '60人', tag: '人数：60人' },
+        { keyword: '明天下午', label: '时间', value: '明天下午', tag: '时间：明天下午' },
+        { keyword: '2小时', label: '时长', value: '2小时', tag: '时长：2小时' },
+        { keyword: '投影仪和白板', label: '设备', value: '投影仪、白板', tag: '设备：投影仪、白板' },
+    ],
+    bestMatch: {
+        name: '明德楼203',
+        type: '集思教室',
+        capacity: '64人',
+        location: '明德楼 2层 203',
+        highlights: ['容量最匹配', '设备齐全', '时间段可预约'],
+    },
+    otherMatches: ['博学楼401', '博学楼402', '明德楼301'],
+    autofillPreview: [
+        { label: '活动名称', value: '数据结构复习会' },
+        { label: '主办单位', value: '计算机学院' },
+        { label: '联系人', value: '张敏 / 13800138000' },
+        { label: '预计人数', value: '60人' },
+        { label: '预约时间', value: '明天下午 15:00 - 17:00' },
+        { label: '场地偏好', value: '明德楼 / 投影仪 / 白板' },
+    ],
+})
+
+const demoStepLabels = Object.freeze([
+    { step: 1, label: '输入需求' },
+    { step: 2, label: '解析条件' },
+    { step: 3, label: '推荐结果' },
+    { step: 4, label: '自动填入' },
+])
+const demoStepTotal = demoStepLabels.length
+
+const demoIntentTags = computed(() => searchDemoPreset.intentFlows.map((item) => item.tag))
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const isDemoFlowActive = (token) =>
+    showSearchDemoDialog.value && demoRunToken.value === token
+
+const stopSearchDemoFlow = () => {
+    demoRunToken.value += 1
+    searchDemoPlaying.value = false
+}
+
+const resetSearchDemoFlow = (targetStep = 1) => {
+    demoCurrentStep.value = targetStep
+    demoTypedQuery.value = ''
+    demoShowBestResult.value = false
+    demoShowAutofill.value = false
+    demoKeywordBubbleReady.value = false
+    demoSourceDisintegrating.value = false
+    demoKeywordSplitRunId.value = 0
+    demoCondensePhase.value = 'idle'
+    demoBreakdownPhase.value = 'idle'
+}
+
+const getCondenseChipStyle = (index, total) => {
+    if (!total) return {}
+    const angle = (Math.PI * 2 * index) / total
+    const radiusX = 170
+    const radiusY = 88
+    const x = Math.cos(angle) * radiusX
+    const y = Math.sin(angle) * radiusY
+    return {
+        '--demo-start-x': `${x.toFixed(1)}px`,
+        '--demo-start-y': `${y.toFixed(1)}px`,
+        '--demo-delay': `${(index * 50).toFixed(0)}ms`,
+    }
+}
+
+const getAutofillBurstStyle = (index, total) => {
+    if (!total) return {}
+    const angle = (-Math.PI / 2) + (Math.PI * 2 * index) / total
+    const radiusX = 165
+    const radiusY = 84
+    const x = Math.cos(angle) * radiusX
+    const y = Math.sin(angle) * radiusY
+    return {
+        '--demo-burst-x': `${x.toFixed(1)}px`,
+        '--demo-burst-y': `${y.toFixed(1)}px`,
+        '--demo-delay': `${(index * 70).toFixed(0)}ms`,
+    }
+}
+
+const playSearchDemoStep = async (step) => {
+    const token = demoRunToken.value + 1
+    demoRunToken.value = token
+    searchDemoPlaying.value = true
+    if (step === 1) {
+        demoTypedQuery.value = ''
+        demoShowBestResult.value = false
+        demoShowAutofill.value = false
+        demoKeywordBubbleReady.value = false
+        demoSourceDisintegrating.value = false
+        demoKeywordSplitRunId.value = 0
+        demoCondensePhase.value = 'idle'
+        demoBreakdownPhase.value = 'idle'
+
+        for (let i = 1; i <= searchDemoPreset.query.length; i += 1) {
+            if (!isDemoFlowActive(token)) return
+            demoTypedQuery.value = searchDemoPreset.query.slice(0, i)
+            await sleep(36)
+        }
+    } else if (step === 2) {
+        demoTypedQuery.value = searchDemoPreset.query
+        demoShowBestResult.value = false
+        demoShowAutofill.value = false
+        demoKeywordBubbleReady.value = false
+        demoSourceDisintegrating.value = false
+        demoKeywordSplitRunId.value = 0
+        demoCondensePhase.value = 'idle'
+        demoBreakdownPhase.value = 'idle'
+        await sleep(180)
+        if (!isDemoFlowActive(token)) return
+        demoSourceDisintegrating.value = true
+        await sleep(220)
+        if (!isDemoFlowActive(token)) return
+        demoKeywordSplitRunId.value += 1
+        demoKeywordBubbleReady.value = true
+        await sleep(980)
+    } else if (step === 3) {
+        demoCondenseRunId.value += 1
+        demoCondensePhase.value = 'running'
+        demoBreakdownPhase.value = 'idle'
+        demoShowBestResult.value = false
+        demoShowAutofill.value = false
+        await sleep(900)
+        if (!isDemoFlowActive(token)) return
+        demoCondensePhase.value = 'done'
+        demoShowBestResult.value = true
+    } else if (step === 4) {
+        demoBreakdownRunId.value += 1
+        demoBreakdownPhase.value = 'running'
+        demoCondensePhase.value = 'idle'
+        demoShowBestResult.value = false
+        demoShowAutofill.value = false
+        await sleep(260)
+        if (!isDemoFlowActive(token)) return
+        demoShowAutofill.value = true
+        await sleep(520)
+        if (!isDemoFlowActive(token)) return
+        demoBreakdownPhase.value = 'done'
+    }
+
+    if (isDemoFlowActive(token)) {
+        searchDemoPlaying.value = false
+    }
+}
+
+const setDemoStep = (step) => {
+    const target = Number(step)
+    if (!Number.isFinite(target) || target < 1 || target > demoStepTotal) {
+        return
+    }
+    demoCurrentStep.value = target
+    playSearchDemoStep(target)
+}
+
+const goDemoNextStep = () => {
+    if (searchDemoPlaying.value || demoCurrentStep.value >= demoStepTotal) return
+    setDemoStep(demoCurrentStep.value + 1)
+}
+
+const goDemoPrevStep = () => {
+    if (searchDemoPlaying.value || demoCurrentStep.value <= 1) return
+    setDemoStep(demoCurrentStep.value - 1)
+}
+
+const isDemoLastStep = computed(() => demoCurrentStep.value >= demoStepTotal)
+const demoStageKey = computed(() => (
+    demoCurrentStep.value <= 2 ? 'stage-12' : `stage-${demoCurrentStep.value}`
+))
+
+const startSearchDemoFlow = () => {
+    stopSearchDemoFlow()
+    resetSearchDemoFlow(1)
+    playSearchDemoStep(1)
+}
+
+const sortedSearchVenues = computed(() => {
+    const list = Array.isArray(venues.value) ? [...venues.value] : []
+    const expectedCapacity = Number(parsedIntent.value?.attendees_count || parsedIntent.value?.capacity || 0)
+
+    return list.sort((a, b) => {
+        const scoreA = Number(a?.score || 0)
+        const scoreB = Number(b?.score || 0)
+        if (scoreA !== scoreB) return scoreB - scoreA
+
+        if (expectedCapacity > 0) {
+            const diffA = Math.abs(Number(a?.capacity || 0) - expectedCapacity)
+            const diffB = Math.abs(Number(b?.capacity || 0) - expectedCapacity)
+            if (diffA !== diffB) return diffA - diffB
+        }
+
+        return Number(a?.id || 0) - Number(b?.id || 0)
+    })
+})
+
+const bestMatchVenue = computed(() => sortedSearchVenues.value[0] || null)
+const extraMatchVenues = computed(() => sortedSearchVenues.value.slice(1))
+
 // 计算筛选后的场地列表
 const filteredVenues = computed(() => {
     let result = [...allVenues.value]
@@ -260,10 +498,6 @@ const fetchAllVenues = async () => {
     } catch (e) { ElMessage.error("获取列表失败") }
 }
 
-const handleTabClick = (tab) => {
-    if (tab.paneName === 'browse') fetchAllVenues()
-}
-
 const fetchBuildingAvailability = async (buildingName = selectedBuildingForBoard.value) => {
     buildingLoading.value = true
     try {
@@ -294,194 +528,216 @@ const fetchBuildingAvailability = async (buildingName = selectedBuildingForBoard
 onMounted(() => {
     fetchAllVenues()
     fetchLatestAnnouncement()
-    fetchBuildingAvailability()
+    if (currentSection.value === 'overview') {
+        fetchBuildingAvailability()
+    } else if (currentSection.value === 'search') {
+        tryOpenSearchDemo()
+    }
 })
+
+watch(currentSection, (section) => {
+    if (section === 'overview') {
+        fetchLatestAnnouncement()
+        fetchBuildingAvailability()
+        return
+    }
+    fetchAllVenues()
+    if (section === 'search') {
+        tryOpenSearchDemo()
+    }
+})
+
+watch(showSearchDemoDialog, (visible) => {
+    if (!visible) {
+        stopSearchDemoFlow()
+    }
+})
+
+const getSearchDemoScope = () => String(authStore.user?.id || authStore.user?.username || 'anonymous')
+
+const tryOpenSearchDemo = () => {
+    if (hasSearchDemoAutoShown(getSearchDemoScope()) || searchDemoTempDismissed.value) return
+    // 首次进入搜索功能时仅自动弹出一次，后续需用户手动查看
+    markSearchDemoAutoShown(getSearchDemoScope())
+    openSearchDemo()
+}
+
+const openSearchDemo = () => {
+    searchDemoTempDismissed.value = false
+    showSearchDemoDialog.value = true
+    nextTick(() => {
+        startSearchDemoFlow()
+    })
+}
+
+const closeSearchDemo = (markSeen = true) => {
+    stopSearchDemoFlow()
+    showSearchDemoDialog.value = false
+    searchDemoTempDismissed.value = !markSeen ? true : false
+}
+
+const replaySearchDemo = () => {
+    startSearchDemoFlow()
+}
+
+const handleSearchDemoBeforeClose = (done) => {
+    stopSearchDemoFlow()
+    searchDemoTempDismissed.value = true
+    done()
+}
 
 // Natural Language Booking Logic
 const parsedIntent = ref({})
 
-const cnNums = {
-    '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5,
-    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
-    '十一': 11, '十二': 12
+const extractBuildingFromQuery = (queryText) => {
+    const text = String(queryText || '').trim()
+    if (!text) return ''
+
+    const zhMatch = text.match(/([A-Za-z0-9一二三四五六七八九十零〇两_-]{1,20}(?:楼|栋|馆|中心))/)
+    if (zhMatch?.[1]) return zhMatch[1].replace(/\s+/g, '')
+
+    const enMatch = text.match(/\b([A-Za-z0-9_-]{1,12})\s*building\b/i)
+    if (enMatch?.[1]) return `${enMatch[1].toUpperCase()}栋`
+
+    return ''
 }
 
-const parseTimeStr = (str) => {
-    if (!str) return null
-    str = str.toLowerCase().trim()
-    let match = str.match(/(\d{1,2}):(\d{2})/)
-    if (match) return { hour: parseInt(match[1]), minute: parseInt(match[2]) }
-    match = str.match(/(\d{1,2})\s?(pm|am|点|下午|上午)?/)
-    if (match) {
-        let h = parseInt(match[1])
-        const suffix = match[2] || ''
-        if (suffix.match(/pm|下午/)) { if (h < 12) h += 12 }
-        else if (suffix.match(/am|上午/)) { if (h === 12) h = 0 }
-        return { hour: h, minute: 0 }
+const handleSearchResults = async (results, query, searchMeta = null) => {
+    venues.value = []
+    searchInsight.value = { summary: '', criteria: [], tips: [] }
+    showMoreMatches.value = false
+    const searchFailed = Boolean(searchMeta?.failed)
+
+    if (searchFailed) {
+        parsedIntent.value = {}
+        searchInsight.value = {
+            summary: String(searchMeta?.insight?.summary || '本次搜索失败，请稍后重试。'),
+            criteria: [],
+            tips: Array.isArray(searchMeta?.insight?.tips)
+                ? searchMeta.insight.tips.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
+                : ['请检查网络或稍后再试'],
+        }
+        return
     }
-    return null
-}
 
-const handleSearchResults = async (results, query) => {
-    venues.value = [] // Clear previous results immediately. Wait for AI/Filter to populate.
-    let intent = {}
-    
-    // 1. Try Backend LLM (DeepSeek)
-    if (query) {
+    let intent = searchMeta?.intent ? { ...searchMeta.intent } : {}
+
+    // Backend 无元数据时，保留兼容解析
+    if (!searchMeta?.intent && query) {
         try {
             const nlpRes = await api.post('/nlp/parse', { query })
-            
-            // Check if ANY field was returned
             const hasData = nlpRes.data && Object.values(nlpRes.data).some(val => val !== null && val !== '')
-            
-            if (hasData) {
-                 intent = nlpRes.data
-            }
+            if (hasData) intent = nlpRes.data
         } catch (e) {
-            console.error("NLP Backend unavailable, falling back to local regex", e)
+            console.error('NLP Backend unavailable, fallback to local parse', e)
         }
     }
 
-    // 2. Fallback to Local Regex if Intent is Empty
-    if (query && !intent.start_time && !intent.attendees_count) {
-        // Pre-process Chinese Numerals
-        let q = query.toLowerCase()
-        q = q.replace(/([一二两三四五六七八九十]+)(点|pm|am)/g, (match, p1, p2) => cnNums[p1] ? cnNums[p1] + p2 : match)
-        q = q.replace(/(下午|上午|pm|am)\s*([一二两三四五六七八九十]+)/g, (match, p1, p2) => cnNums[p2] ? p1 + cnNums[p2] : match)
-        
-        // Detect attendees
-        const peopleMatch = q.match(/(\d+)\s?(people|ren|人|seats|capacity)/i)
-        if (peopleMatch) intent.attendees_count = parseInt(peopleMatch[1])
-        
-        // Detect Date
-        let targetDate = null
-        if (q.includes('tomorrow') || q.includes('明天')) {
-            targetDate = new Date()
-            targetDate.setDate(targetDate.getDate() + 1)
-        } else if (q.includes('next week') || q.includes('下周')) {
-            targetDate = new Date()
-            targetDate.setDate(targetDate.getDate() + 7)
-        } else if (q.includes('friday') || q.includes('周五')) {
-            targetDate = new Date()
-            // Simple logic: next coming friday
-            const day = targetDate.getDay()
-            const diff = 5 - day + (day >= 5 ? 7 : 0)
-            targetDate.setDate(targetDate.getDate() + diff)
-        }
-        
-        // Detect Time (Range or Single)
-        let startHour = 9, startMinute = 0
-        let endHour = 11, endMinute = 0
-        let timeFound = false
-        
-        // Regex for range: "5pm to 6pm"
-        const rangeMatch = q.match(/(\d{1,2}(?::\d{2})?\s*(?:pm|am|点|下午|上午)?)\s*(?:to|-|until|到)\s*(\d{1,2}(?::\d{2})?\s*(?:pm|am|点|下午|上午)?)/i)
-        
-        if (rangeMatch) {
-            const startObj = parseTimeStr(rangeMatch[1])
-            const endObj = parseTimeStr(rangeMatch[2])
-            
-            if (startObj && endObj) {
-                timeFound = true
-                startHour = startObj.hour
-                startMinute = startObj.minute
-                endHour = endObj.hour
-                endMinute = endObj.minute
-                
-                // Context adjustment
-                const startStr = rangeMatch[1].toLowerCase()
-                const endStr = rangeMatch[2].toLowerCase()
-                if (endStr.match(/pm|下午/) && !startStr.match(/pm|am|下午|上午/) && startHour < 12) {
-                     if (startHour + 12 <= endHour) startHour += 12
-                }
-            }
-        } 
-        
-        if (!timeFound) {
-             // Fallback to single time tokens
-             const tokens = q.match(/(?:下午|上午|pm|am)?\s*(\d{1,2}(?::\d{2})?)\s*(?:pm|am|点|下午|上午)?/g)
-             if (tokens) {
-                 for (const token of tokens) {
-                     if (/\d/.test(token)) {
-                        const tStr = token.replace(/at\s?|@\s?/i, '').trim()
-                        let h = 0, m = 0
-                        const dMatch = tStr.match(/(\d{1,2})(?::(\d{2}))?/)
-                        if (dMatch) {
-                            h = parseInt(dMatch[1])
-                            m = dMatch[2] ? parseInt(dMatch[2]) : 0
-                            
-                            const isPM = tStr.match(/pm|下午/) || (q.includes('下午') && !tStr.match(/am|上午/))
-                            const isAM = tStr.match(/am|上午/)
-                            
-                            if (isPM && h < 12) h += 12
-                            else if (isAM && h === 12) h = 0
-                            else if (!isAM && !isPM && h < 8) h += 12 
-                            
-                            startHour = h
-                            startMinute = m
-                            endHour = startHour + 2
-                            endMinute = startMinute
-                            timeFound = true
-                            break
-                        }
-                     }
-                 }
-             }
-        }
-        
-        if (targetDate) {
-            targetDate.setHours(startHour, startMinute, 0, 0)
-            intent.start_time = targetDate.toISOString()
-            const endDate = new Date(targetDate)
-            if (endHour < startHour) endDate.setDate(endDate.getDate() + 1)
-            endDate.setHours(endHour, endMinute, 0, 0)
-            intent.end_time = endDate.toISOString()
+    const extractedBuilding = extractBuildingFromQuery(query)
+    if (!intent.building && extractedBuilding) {
+        intent.building = extractedBuilding
+    }
+
+    if (!intent.start_time && intent.date && Array.isArray(intent.time_range) && intent.time_range.length === 2) {
+        const [startHM, endHM] = intent.time_range
+        const start = new Date(`${intent.date}T${startHM}:00`)
+        const end = new Date(`${intent.date}T${endHM}:00`)
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end > start) {
+            intent.start_time = start.toISOString()
+            intent.end_time = end.toISOString()
         }
     }
-    
+
+    // 保底提取人数（当 LLM 未提取出 capacity 时）
+    const intentCapacity = Number(intent.attendees_count || intent.capacity || 0)
+    if ((!Number.isFinite(intentCapacity) || intentCapacity <= 0) && query) {
+        const peopleMatch = String(query).toLowerCase().match(/(\d+)\s?(people|ren|人|seats|capacity)/i)
+        if (peopleMatch) intent.capacity = parseInt(peopleMatch[1], 10)
+    }
+    if (!intent.attendees_count && Number(intent.capacity) > 0) {
+        intent.attendees_count = Number(intent.capacity)
+    }
+
     parsedIntent.value = intent
-    
-    // 3. Filtering Logic
-    // Only use allVenues if we have actual filtering criteria (Capacity/Type), 
-    // otherwise if text search failed, return empty to avoid showing unrelated venues.
-    const hasFilter = intent.attendees_count || intent.venue_type
-    let candidates = results.length > 0 ? results : (hasFilter ? allVenues.value : [])
-    
-    // Filter by Capacity
-    if (intent.attendees_count) {
-        candidates = candidates.filter(v => v.capacity >= intent.attendees_count)
+
+    const requiredCapacity = Number(intent.attendees_count || intent.capacity || 0)
+    const intentVenueType = intent.type || intent.venue_type
+    const intentFacilities = Array.isArray(intent.facilities) ? intent.facilities.filter(Boolean) : []
+
+    const hasFilter = requiredCapacity || intentVenueType || intent.building || intentFacilities.length > 0
+    let candidates = Array.isArray(results) ? [...results] : []
+    if (candidates.length === 0 && hasFilter && !searchMeta) {
+        candidates = [...allVenues.value]
     }
-    
-    // Filter by Venue Type
-    if (intent.venue_type) {
-        // Map Chinese attributes to English DB types
-        const typeMap = { '报告厅': 'Hall', '教室': 'Classroom' }
-        const mappedType = typeMap[intent.venue_type] || intent.venue_type
-        
-        candidates = candidates.filter(v => 
-            (v.type && v.type.toLowerCase().includes(mappedType.toLowerCase())) || 
-            v.name.toLowerCase().includes(mappedType.toLowerCase()) ||
-            v.name.includes(intent.venue_type) // Match raw Chinese name if exists
+
+    if (requiredCapacity > 0) {
+        candidates = candidates.filter(v => Number(v.capacity || 0) >= requiredCapacity)
+    }
+
+    if (intentVenueType) {
+        const typeMap = { '报告厅': 'Hall', '教室': 'Classroom', '实验室': 'Lab' }
+        const mappedType = String(typeMap[intentVenueType] || intentVenueType).toLowerCase()
+        candidates = candidates.filter(v =>
+            String(v.type || '').toLowerCase().includes(mappedType) ||
+            String(v.name || '').toLowerCase().includes(mappedType)
         )
     }
-    
+
+    if (intent.building) {
+        const buildingKw = String(intent.building).toLowerCase()
+        candidates = candidates.filter((venue) => {
+            const buildingName = String(venue.building_name || '').toLowerCase()
+            const location = String(venue.location || '').toLowerCase()
+            return buildingName.includes(buildingKw) || location.includes(buildingKw)
+        })
+    }
+
+    if (intentFacilities.length > 0) {
+        candidates = candidates.filter((venue) => {
+            const text = `${venue.name || ''} ${venue.location || ''} ${(venue.facilities || []).join(' ')}`.toLowerCase()
+            return intentFacilities.every((facility) => text.includes(String(facility).toLowerCase()))
+        })
+    }
+
     venues.value = candidates
 
-    // Notification: SEARCH Complete
-    if (intent.attendees_count || intent.venue_type) {
-        let msg = `AI筛选完成: 找到 ${candidates.length} 个符合条件的场馆`
-        const criteria = []
-        if (intent.attendees_count) criteria.push(`容量≥${intent.attendees_count}人`)
-        if (intent.venue_type) criteria.push(`类型:${intent.venue_type}`)
-        
-        if (criteria.length > 0) msg += ` (${criteria.join(', ')})`
-        ElMessage.success({ message: msg, duration: 3000 })
+    const fallbackCriteria = []
+    if (requiredCapacity > 0) fallbackCriteria.push(`人数≥${requiredCapacity}`)
+    if (intentVenueType) fallbackCriteria.push(`类型:${intentVenueType}`)
+    if (intent.building) fallbackCriteria.push(`楼栋:${intent.building}`)
+    if (intentFacilities.length > 0) {
+        intentFacilities.slice(0, 3).forEach((item) => fallbackCriteria.push(`设备:${item}`))
+    }
+    const defaults = Array.isArray(searchMeta?.defaults) ? searchMeta.defaults : []
+    defaults.slice(0, 2).forEach((note) => fallbackCriteria.push(`默认:${note}`))
+
+    const summaryFromBackend = String(searchMeta?.insight?.summary || '').trim()
+    const tipsFromBackend = Array.isArray(searchMeta?.insight?.tips)
+        ? searchMeta.insight.tips.map((item) => String(item).trim()).filter(Boolean).slice(0, 3)
+        : []
+    const criteriaFromBackend = Array.isArray(searchMeta?.insight?.criteria)
+        ? searchMeta.insight.criteria.map((item) => String(item).trim()).filter(Boolean).slice(0, 8)
+        : []
+
+    searchInsight.value = {
+        summary: summaryFromBackend || (venues.value.length > 0
+            ? `已结合你的条件筛选，找到 ${venues.value.length} 个候选场馆。`
+            : '当前条件下暂无可用场馆，可尝试放宽要求。'),
+        criteria: criteriaFromBackend.length > 0 ? criteriaFromBackend : fallbackCriteria,
+        tips: tipsFromBackend.length > 0
+            ? tipsFromBackend
+            : (venues.value.length === 0 ? ['放宽人数或设备要求', '尝试更换时间段', '可先去掉楼栋限制'] : []),
+    }
+
+    if (hasFilter) {
+        ElMessage.success({ message: `智能检索完成：找到 ${venues.value.length} 个候选场馆`, duration: 2500 })
     }
 }
 
 // Booking Logic
 const showModal = ref(false)
 const selectedVenue = ref(null)
+const autoFilledFields = ref([])
 const reservationForm = ref({
   activity_name: '',
   organizer_unit: '',
@@ -566,6 +822,7 @@ const isValidDateTimeString = (value) => {
 
 const openBooking = (venue) => {
     selectedVenue.value = venue
+    autoFilledFields.value = []
     bookingMode.value = 'single'
     batchAllOrNothing.value = true
     batchSlots.value = [createEmptyBatchSlot()]
@@ -577,13 +834,26 @@ const openBooking = (venue) => {
             ...reservationForm.value,
             ...parsedIntent.value,
         }
-        if (parsedIntent.value.attendees_count) {
-             reservationForm.value.attendees_count = parsedIntent.value.attendees_count
+        const resolvedAttendees = Number(parsedIntent.value.attendees_count || parsedIntent.value.capacity || 0)
+        if (Number.isFinite(resolvedAttendees) && resolvedAttendees > 0) {
+            reservationForm.value.attendees_count = resolvedAttendees
         }
 
-        if (parsedIntent.value.start_time) {
-            const startDate = new Date(parsedIntent.value.start_time)
-            const endDate = parsedIntent.value.end_time ? new Date(parsedIntent.value.end_time) : null
+        let parsedStartTime = parsedIntent.value.start_time
+        let parsedEndTime = parsedIntent.value.end_time
+        if (!parsedStartTime && parsedIntent.value.date && Array.isArray(parsedIntent.value.time_range) && parsedIntent.value.time_range.length === 2) {
+            const [startHM, endHM] = parsedIntent.value.time_range
+            const start = new Date(`${parsedIntent.value.date}T${startHM}:00`)
+            const end = new Date(`${parsedIntent.value.date}T${endHM}:00`)
+            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end > start) {
+                parsedStartTime = start.toISOString()
+                parsedEndTime = end.toISOString()
+            }
+        }
+
+        if (parsedStartTime) {
+            const startDate = new Date(parsedStartTime)
+            const endDate = parsedEndTime ? new Date(parsedEndTime) : null
             reservationForm.value.date = toLocalDateString(startDate)
             reservationForm.value.start_time_input = startDate.toTimeString().slice(0, 5)
             if (endDate) {
@@ -604,15 +874,18 @@ const openBooking = (venue) => {
         // Notification: FILL Complete
         const filledFields = []
         if (parsedIntent.value.activity_name) filledFields.push('活动名称')
-        if (parsedIntent.value.start_time) filledFields.push('时间')
+        if (parsedStartTime) filledFields.push('时间')
         if (parsedIntent.value.contact_name) filledFields.push('联系人')
         if (parsedIntent.value.organizer_unit) filledFields.push('主办单位')
+        if (Number.isFinite(resolvedAttendees) && resolvedAttendees > 0) filledFields.push('人数')
         
         if (filledFields.length > 0) {
+            autoFilledFields.value = filledFields.slice()
             ElMessage.success(`AI自动填入: ${filledFields.join(', ')} 等信息`)
         }
     } else {
         // Reset to clean state if no intent
+         autoFilledFields.value = []
          reservationForm.value.attendees_count = 10
          reservationForm.value.activity_name = ''
             reservationForm.value.date = ''
@@ -760,6 +1033,7 @@ const buildReservationPayload = (startDateTime, endDateTime) => ({
 const clearBookingFormState = () => {
     showModal.value = false
     parsedIntent.value = {}
+    autoFilledFields.value = []
     selectedFile.value = null
     fileList.value = []
     bookingMode.value = 'single'
@@ -910,7 +1184,7 @@ const fetchLatestAnnouncement = async () => {
         const res = await api.get('/announcements/latest')
         latestAnnouncement.value = res.data
     } catch (e) {
-        if (e?.response?.status !== 404) {
+        if (e?.response?.status !== 404 && e?.response?.status !== 401) {
             ElMessage.error('获取公告失败')
         }
         latestAnnouncement.value = null
@@ -926,142 +1200,134 @@ const goToAnnouncements = () => {
 
 <template>
   <div class="dashboard-container app-page app-stack">
-    <el-card class="glass-panel notice-panel" shadow="never" @click="goToAnnouncements">
-        <template #header>
-            <div class="panel-header">
-                <span>最新公告</span>
-                <el-tag size="small" effect="plain" round>查看历史</el-tag>
-            </div>
-        </template>
-        <div v-if="latestAnnouncement" class="notice-body">
-            <div class="notice-title">{{ latestAnnouncement.title }}</div>
-            <div class="notice-time">{{ formatTime(latestAnnouncement.publish_time) }}</div>
-            <div class="notice-preview">{{ getNoticePreview(latestAnnouncement.content) }}</div>
-        </div>
-        <el-empty v-else description="暂无公告" :image-size="60" />
-    </el-card>
-    <el-card class="glass-panel building-panel" shadow="never">
-        <template #header>
-            <div class="panel-header panel-header--stack">
-                <span><el-icon><DataAnalysis /></el-icon> 楼栋教室空闲看板</span>
-                <el-select
-                    v-model="selectedBuildingForBoard"
-                    class="building-select"
-                    placeholder="选择楼栋"
-                    @change="fetchBuildingAvailability"
-                >
-                    <el-option
-                        v-for="item in buildingAvailability.buildings"
-                        :key="item.name"
-                        :label="`${item.name} (${item.available_classrooms}/${item.total_classrooms})`"
-                        :value="item.name"
-                    />
-                </el-select>
-            </div>
-        </template>
-
-        <div class="building-overview">
-            <span>总楼栋 {{ buildingAvailability.summary.total_buildings }}</span>
-            <span>教室 {{ buildingAvailability.summary.total_classrooms }}</span>
-            <span class="ok">空闲 {{ buildingAvailability.summary.available_classrooms }}</span>
-            <span class="warn">占用 {{ buildingAvailability.summary.occupied_classrooms }}</span>
-            <span class="mute">维护 {{ buildingAvailability.summary.maintenance_classrooms }}</span>
-        </div>
-
-        <div v-loading="buildingLoading" class="classroom-list">
-            <div v-for="room in buildingAvailability.classrooms" :key="room.id" class="classroom-item">
-                <div class="classroom-main">
-                    <span class="room-name">{{ room.room_name || room.name }}</span>
-                    <span class="room-capacity">{{ room.capacity }}人</span>
+    <div class="student-section">
+        <div v-if="currentSection === 'overview'" class="overview-stack">
+            <el-card class="glass-panel notice-panel" shadow="never" @click="goToAnnouncements">
+                <template #header>
+                    <div class="panel-header">
+                        <span>最新公告</span>
+                        <el-tag size="small" effect="plain" round>查看历史</el-tag>
+                    </div>
+                </template>
+                <div v-if="latestAnnouncement" class="notice-body">
+                    <div class="notice-title">{{ latestAnnouncement.title }}</div>
+                    <div class="notice-time">{{ formatTime(latestAnnouncement.publish_time) }}</div>
+                    <div class="notice-preview">{{ getNoticePreview(latestAnnouncement.content) }}</div>
                 </div>
-                <div class="classroom-side">
-                    <el-tag
-                        size="small"
-                        :type="room.status === 'available' ? 'success' : room.status === 'occupied' ? 'warning' : 'info'"
-                    >
-                        {{ room.status === 'available' ? '空闲' : room.status === 'occupied' ? '占用' : '维护' }}
-                    </el-tag>
-                </div>
-            </div>
-            <el-empty v-if="!buildingLoading && buildingAvailability.classrooms.length === 0" description="当前楼栋暂无教室数据" :image-size="46" />
-        </div>
-    </el-card>
-    <!-- RESTORED: Functional Tabbed System -->
-    <el-tabs v-model="activeTab" class="glass-tabs" @tab-click="handleTabClick">
-        <el-tab-pane label="智能搜索" name="search">
-            <div class="search-island">
-                <SmartSearch @search-complete="handleSearchResults" />
-            </div>
-            <div v-if="venues.length > 0" class="results-grid">
-                <VenueCard v-for="venue in venues" :key="venue.id" :venue="venue" @book="openBooking" @view-detail="openVenueDetail" />
-            </div>
-            <el-empty v-else description="搜索看看，或者在'浏览所有'中挑选" />
-        </el-tab-pane>
+                <el-empty v-else description="暂无公告" :image-size="60" />
+            </el-card>
 
-        <el-tab-pane label="浏览所有场馆" name="browse">
-             <!-- 筛选面板 -->
-             <div class="filter-bar">
-                 <el-button :icon="Filter" @click="showFilterPanel = !showFilterPanel">
-                     {{ showFilterPanel ? '收起筛选' : '展开筛选' }}
-                 </el-button>
-                 <span class="filter-result-count">共 {{ filteredVenues.length }} 个场馆</span>
-             </div>
-             
-             <el-collapse-transition>
-                 <div v-show="showFilterPanel" class="filter-panel glass-panel">
-                     <el-form :model="filterForm" inline class="filter-form">
-                         <el-form-item label="场馆类型">
-                             <el-select v-model="filterForm.type" placeholder="全部类型" clearable style="width: 120px;">
-                                 <el-option v-for="opt in venueTypeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
-                             </el-select>
-                         </el-form-item>
-                         <el-form-item label="最小容量">
-                             <el-input-number
-                                 v-model="filterForm.minCapacity"
-                                 class="filter-input filter-input--capacity"
-                                 :min="0"
-                                 :max="1000"
-                                 controls-position="right"
-                             />
-                         </el-form-item>
-                         <el-form-item label="位置">
-                             <el-input
-                                 v-model="filterForm.location"
-                                 class="filter-input filter-input--keyword"
-                                 placeholder="关键词"
-                                 clearable
-                             />
-                         </el-form-item>
-                         <el-form-item label="楼栋">
-                             <el-select v-model="filterForm.building" placeholder="全部楼栋" clearable style="width: 140px;">
-                                 <el-option v-for="item in buildingOptions" :key="item" :label="item" :value="item" />
-                             </el-select>
-                         </el-form-item>
-                         <el-form-item label="状态">
-                             <el-select v-model="filterForm.status" placeholder="全部" clearable style="width: 100px;">
-                                 <el-option label="可用" value="available" />
-                                 <el-option label="维护中" value="maintenance" />
-                             </el-select>
-                         </el-form-item>
-                         <el-form-item label="预约状态">
-                             <el-select v-model="filterForm.reservationStatus" placeholder="全部" clearable style="width: 120px;">
-                                 <el-option label="当前已预约" value="reserved" />
-                                 <el-option label="当前空闲" value="free" />
-                             </el-select>
-                         </el-form-item>
-                         <el-form-item label="设施要求">
-                             <el-checkbox-group v-model="filterForm.facilities">
-                                 <el-checkbox v-for="f in facilityOptions" :key="f" :label="f">{{ f }}</el-checkbox>
-                             </el-checkbox-group>
-                         </el-form-item>
-                         <el-form-item>
-                             <el-button @click="resetFilters">重置</el-button>
-                         </el-form-item>
-                     </el-form>
-                 </div>
-             </el-collapse-transition>
-             
-             <div class="building-browse-grid">
+            <el-card class="glass-panel building-panel" shadow="never">
+                <template #header>
+                    <div class="panel-header panel-header--stack">
+                        <span><el-icon><DataAnalysis /></el-icon> 楼栋教室空闲看板</span>
+                        <el-select
+                            v-model="selectedBuildingForBoard"
+                            class="building-select"
+                            placeholder="选择楼栋"
+                            @change="fetchBuildingAvailability"
+                        >
+                            <el-option
+                                v-for="item in buildingAvailability.buildings"
+                                :key="item.name"
+                                :label="`${item.name} (${item.available_classrooms}/${item.total_classrooms})`"
+                                :value="item.name"
+                            />
+                        </el-select>
+                    </div>
+                </template>
+
+                <div class="building-overview">
+                    <span>总楼栋 {{ buildingAvailability.summary.total_buildings }}</span>
+                    <span>教室 {{ buildingAvailability.summary.total_classrooms }}</span>
+                    <span class="ok">空闲 {{ buildingAvailability.summary.available_classrooms }}</span>
+                    <span class="warn">占用 {{ buildingAvailability.summary.occupied_classrooms }}</span>
+                    <span class="mute">维护 {{ buildingAvailability.summary.maintenance_classrooms }}</span>
+                </div>
+
+                <div v-loading="buildingLoading" class="classroom-list">
+                    <div v-for="room in buildingAvailability.classrooms" :key="room.id" class="classroom-item">
+                        <div class="classroom-main">
+                            <span class="room-name">{{ room.room_name || room.name }}</span>
+                            <span class="room-capacity">{{ room.capacity }}人</span>
+                        </div>
+                        <div class="classroom-side">
+                            <el-tag
+                                size="small"
+                                :type="room.status === 'available' ? 'success' : room.status === 'occupied' ? 'warning' : 'info'"
+                            >
+                                {{ room.status === 'available' ? '空闲' : room.status === 'occupied' ? '占用' : '维护' }}
+                            </el-tag>
+                        </div>
+                    </div>
+                    <el-empty v-if="!buildingLoading && buildingAvailability.classrooms.length === 0" description="当前楼栋暂无教室数据" :image-size="46" />
+                </div>
+            </el-card>
+        </div>
+
+        <template v-else-if="currentSection === 'all-venues'">
+            <div class="filter-bar">
+                <el-button :icon="Filter" @click="showFilterPanel = !showFilterPanel">
+                    {{ showFilterPanel ? '收起筛选' : '展开筛选' }}
+                </el-button>
+                <span class="filter-result-count">共 {{ filteredVenues.length }} 个场馆</span>
+            </div>
+
+            <el-collapse-transition>
+                <div v-show="showFilterPanel" class="filter-panel glass-panel">
+                    <el-form :model="filterForm" inline class="filter-form">
+                        <el-form-item label="场馆类型">
+                            <el-select v-model="filterForm.type" placeholder="全部类型" clearable style="width: 120px;">
+                                <el-option v-for="opt in venueTypeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                            </el-select>
+                        </el-form-item>
+                        <el-form-item label="最小容量">
+                            <el-input-number
+                                v-model="filterForm.minCapacity"
+                                class="filter-input filter-input--capacity"
+                                :min="0"
+                                :max="1000"
+                                controls-position="right"
+                            />
+                        </el-form-item>
+                        <el-form-item label="位置">
+                            <el-input
+                                v-model="filterForm.location"
+                                class="filter-input filter-input--keyword"
+                                placeholder="关键词"
+                                clearable
+                            />
+                        </el-form-item>
+                        <el-form-item label="楼栋">
+                            <el-select v-model="filterForm.building" placeholder="全部楼栋" clearable style="width: 140px;">
+                                <el-option v-for="item in buildingOptions" :key="item" :label="item" :value="item" />
+                            </el-select>
+                        </el-form-item>
+                        <el-form-item label="状态">
+                            <el-select v-model="filterForm.status" placeholder="全部" clearable style="width: 100px;">
+                                <el-option label="可用" value="available" />
+                                <el-option label="维护中" value="maintenance" />
+                            </el-select>
+                        </el-form-item>
+                        <el-form-item label="预约状态">
+                            <el-select v-model="filterForm.reservationStatus" placeholder="全部" clearable style="width: 120px;">
+                                <el-option label="当前已预约" value="reserved" />
+                                <el-option label="当前空闲" value="free" />
+                            </el-select>
+                        </el-form-item>
+                        <el-form-item label="设施要求">
+                            <el-checkbox-group v-model="filterForm.facilities">
+                                <el-checkbox v-for="f in facilityOptions" :key="f" :label="f">{{ f }}</el-checkbox>
+                            </el-checkbox-group>
+                        </el-form-item>
+                        <el-form-item>
+                            <el-button @click="resetFilters">重置</el-button>
+                        </el-form-item>
+                    </el-form>
+                </div>
+            </el-collapse-transition>
+
+            <div class="building-browse-grid">
                 <el-card v-for="building in browseBuildingGroups" :key="building.name" class="building-browse-card glass-panel" shadow="never">
                     <div class="building-browse-card__head">
                         <div>
@@ -1076,10 +1342,69 @@ const goToAnnouncements = () => {
                         <span class="meta-pill">总数 {{ building.total }}</span>
                     </div>
                 </el-card>
-             </div>
+            </div>
             <el-empty v-if="browseBuildingGroups.length === 0" description="没有符合条件的楼栋" />
-        </el-tab-pane>
-    </el-tabs>
+        </template>
+
+        <template v-else>
+            <div class="search-island">
+                <SmartSearch v-model="searchInput" @search-complete="handleSearchResults" />
+            </div>
+            <div class="search-demo-actions">
+                <el-button size="small" round plain @click="openSearchDemo">查看演示</el-button>
+            </div>
+            <el-card
+                v-if="searchInsight.summary || searchInsight.criteria.length || searchInsight.tips.length"
+                class="glass-panel search-insight-panel"
+                shadow="never"
+            >
+                <template #header>
+                    <div class="panel-header">
+                        <span>智析</span>
+                        <el-tag size="small" effect="plain" round>{{ sortedSearchVenues.length }}条</el-tag>
+                    </div>
+                </template>
+                <div v-if="searchInsight.summary" class="search-insight-summary">{{ searchInsight.summary }}</div>
+                <div v-if="searchInsight.criteria.length > 0" class="search-insight-criteria">
+                    <span v-for="(item, idx) in searchInsight.criteria" :key="`${item}-${idx}`" class="meta-pill">{{ item }}</span>
+                </div>
+                <div v-if="searchInsight.tips.length > 0" class="search-insight-tips">
+                    <div v-for="(tip, idx) in searchInsight.tips" :key="`${tip}-${idx}`" class="search-tip-item">
+                        {{ tip }}
+                    </div>
+                </div>
+            </el-card>
+            <template v-if="bestMatchVenue">
+                <div class="best-result-wrap">
+                    <div class="best-result-head">
+                        <el-tag size="small" type="success" effect="plain" round>最佳推荐</el-tag>
+                        <span class="best-result-text">最匹配当前需求</span>
+                    </div>
+                    <div class="results-grid results-grid--search">
+                        <VenueCard :venue="bestMatchVenue" @book="openBooking" @view-detail="openVenueDetail" />
+                    </div>
+                </div>
+
+                <div v-if="extraMatchVenues.length > 0" class="more-result-wrap">
+                    <el-button class="more-match-tab" size="small" round @click="showMoreMatches = !showMoreMatches">
+                        {{ showMoreMatches ? '收起其余匹配' : `展开其余匹配（${extraMatchVenues.length}）` }}
+                    </el-button>
+                    <el-collapse-transition>
+                        <div v-show="showMoreMatches" class="results-grid results-grid--search">
+                            <VenueCard
+                                v-for="venue in extraMatchVenues"
+                                :key="venue.id"
+                                :venue="venue"
+                                @book="openBooking"
+                                @view-detail="openVenueDetail"
+                            />
+                        </div>
+                    </el-collapse-transition>
+                </div>
+            </template>
+            <el-empty v-else description="搜索看看，或者在“场馆”里挑选" />
+        </template>
+    </div>
 
     <el-dialog
         v-model="showBuildingVenueDialog"
@@ -1107,6 +1432,14 @@ const goToAnnouncements = () => {
     <!-- BOOKING DIALOG: PILL STACK SYSTEM -->
     <el-dialog v-model="showModal" title="预约场馆申请" width="600px" class="glass-dialog" align-center append-to-body>
         <el-form :model="reservationForm">
+            <el-alert
+                v-if="autoFilledFields.length > 0"
+                class="autofill-alert"
+                type="success"
+                :closable="false"
+                show-icon
+                :title="`已根据智能搜索自动填入：${autoFilledFields.join('、')}`"
+            />
             <div class="form-pill">
                 <el-form-item label="预约模式">
                     <el-radio-group v-model="bookingMode" size="small" class="booking-mode-group" @change="syncAdvancedModeSeed">
@@ -1404,12 +1737,179 @@ const goToAnnouncements = () => {
             </el-button>
         </template>
     </el-dialog>
+
+    <el-dialog
+        v-model="showSearchDemoDialog"
+        title="智能搜索演示"
+        width="620px"
+        class="glass-dialog"
+        align-center
+        append-to-body
+        :before-close="handleSearchDemoBeforeClose"
+    >
+        <div class="search-demo-shell">
+            <div class="demo-progress-track">
+                <div
+                    v-for="item in demoStepLabels"
+                    :key="item.step"
+                    :class="[
+                        'demo-progress-item',
+                        { 'is-active': demoCurrentStep === item.step, 'is-done': demoCurrentStep > item.step },
+                    ]"
+                >
+                    <span class="demo-progress-index">{{ item.step }}</span>
+                    <span>{{ item.label }}</span>
+                </div>
+            </div>
+
+            <Transition name="demo-fade-slide" mode="out-in">
+                <div :key="demoStageKey" class="demo-stage">
+                    <template v-if="demoCurrentStep <= 2">
+                        <div class="demo-step-title">
+                            {{ demoCurrentStep === 1 ? '步骤1：输入需求' : '步骤2：解析条件' }}
+                        </div>
+                        <div
+                            class="demo-extract-stage"
+                            :class="{ 'is-source-gone': demoCurrentStep === 2 && demoSourceDisintegrating }"
+                        >
+                            <div
+                                class="demo-search-box demo-source-line--extract"
+                                :class="{
+                                    'is-disintegrating': demoCurrentStep === 2 && demoSourceDisintegrating,
+                                }"
+                            >
+                                <template v-if="demoCurrentStep === 1">
+                                    <span class="demo-search-query">{{ demoTypedQuery || '正在输入示例需求...' }}</span>
+                                    <span v-if="searchDemoPlaying" class="demo-caret" />
+                                </template>
+                                <template v-else>
+                                    <span class="demo-search-query demo-search-query--carry">{{ demoTypedQuery || searchDemoPreset.query }}</span>
+                                </template>
+                            </div>
+
+                            <div v-if="demoCurrentStep === 2" class="demo-key-bubble-grid-wrap" :class="{ 'is-visible': demoKeywordBubbleReady }">
+                                <div :key="`split-${demoKeywordSplitRunId}`" class="demo-key-bubble-list">
+                                    <div
+                                        v-for="(item, idx) in searchDemoPreset.intentFlows"
+                                        :key="`target-${item.keyword}-${idx}`"
+                                        class="demo-key-bubble-row"
+                                        :style="{
+                                            '--demo-row-delay': `${idx * 68}ms`,
+                                            '--demo-split-offset': `${(idx - (searchDemoPreset.intentFlows.length - 1) / 2) * 10}px`,
+                                        }"
+                                    >
+                                        <span class="demo-key-bubble-target">
+                                            {{ item.keyword }}
+                                        </span>
+                                        <span class="demo-key-meaning-arrow" />
+                                        <span class="demo-key-meaning-chip">
+                                            <span class="demo-key-bubble-label">{{ item.label }}：</span>{{ item.value }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="demoCurrentStep === 1" class="demo-note">你只需要描述人数、时间、楼栋和设备，系统就能理解你的需求。</div>
+                        <div v-else class="demo-note">系统会提炼关键词并转成结构化条件，便于后续匹配。</div>
+                    </template>
+
+                    <template v-else-if="demoCurrentStep === 3">
+                        <div class="demo-step-title">步骤3：推荐结果</div>
+                        <div :key="`condense-${demoCondenseRunId}`" class="demo-condense-stage">
+                            <div v-if="demoCondensePhase !== 'done'" class="demo-condense-cloud">
+                                <span
+                                    v-for="(tag, idx) in demoIntentTags"
+                                    :key="`${tag}-${idx}-${demoCondenseRunId}`"
+                                    class="demo-condense-chip"
+                                    :style="getCondenseChipStyle(idx, demoIntentTags.length)"
+                                >
+                                    {{ tag }}
+                                </span>
+                            </div>
+                            <div class="demo-condense-core" :class="{ 'is-active': demoCondensePhase !== 'idle' }" />
+                            <div v-if="demoShowBestResult" class="demo-best-card demo-best-card--born">
+                                <div class="demo-best-head">
+                                    <div class="demo-best-name">{{ searchDemoPreset.bestMatch.name }}</div>
+                                    <el-tag size="small" type="success" effect="plain" round>最佳推荐</el-tag>
+                                </div>
+                                <div class="demo-best-meta">
+                                    {{ searchDemoPreset.bestMatch.type }} · {{ searchDemoPreset.bestMatch.capacity }} ·
+                                    {{ searchDemoPreset.bestMatch.location }}
+                                </div>
+                                <div class="demo-best-tags">
+                                    <span v-for="item in searchDemoPreset.bestMatch.highlights" :key="item" class="meta-pill ok">
+                                        {{ item }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="demo-others-tab">
+                            其余匹配（{{ searchDemoPreset.otherMatches.length }}）可点击展开：
+                            {{ searchDemoPreset.otherMatches.join('、') }}
+                        </div>
+                    </template>
+
+                    <template v-else>
+                        <div class="demo-step-title">步骤4：自动填入</div>
+                        <div :key="`break-${demoBreakdownRunId}`" class="demo-break-stage">
+                            <div
+                                class="demo-break-origin-card"
+                                :class="{ 'is-splitting': demoBreakdownPhase === 'running', 'is-faded': demoBreakdownPhase === 'done' }"
+                            >
+                                <div class="demo-break-name">{{ searchDemoPreset.bestMatch.name }}</div>
+                                <div class="demo-break-meta">
+                                    {{ searchDemoPreset.bestMatch.type }} · {{ searchDemoPreset.bestMatch.capacity }}
+                                </div>
+                            </div>
+                            <div v-if="demoShowAutofill" class="demo-autofill-burst">
+                                <div
+                                    v-for="(item, idx) in searchDemoPreset.autofillPreview"
+                                    :key="item.label"
+                                    class="demo-autofill-item demo-autofill-item--burst"
+                                    :style="getAutofillBurstStyle(idx, searchDemoPreset.autofillPreview.length)"
+                                >
+                                    <div class="demo-autofill-label">{{ item.label }}</div>
+                                    <div class="demo-autofill-value">{{ item.value }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="demo-note">系统会把关键信息自动填入表单，你只需要核对并提交。</div>
+                    </template>
+                </div>
+            </Transition>
+
+            <div class="demo-flow-hint">
+                {{
+                    searchDemoPlaying
+                        ? '当前步骤动画播放中，请稍候...'
+                        : (isDemoLastStep ? '演示已结束，可重新播放或直接关闭。' : '点击“下一步”继续引导。')
+                }}
+            </div>
+        </div>
+        <template #footer>
+            <el-button @click="closeSearchDemo(false)">稍后再看</el-button>
+            <el-button :disabled="searchDemoPlaying || demoCurrentStep === 1" @click="goDemoPrevStep">上一步</el-button>
+            <el-button v-if="!isDemoLastStep" :disabled="searchDemoPlaying" @click="goDemoNextStep">下一步</el-button>
+            <el-button v-else :disabled="searchDemoPlaying" @click="replaySearchDemo">重新播放</el-button>
+            <el-button type="primary" @click="closeSearchDemo(true)">我知道了</el-button>
+        </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .dashboard-container {
     width: 100%;
+}
+
+.student-section {
+    width: 100%;
+}
+
+.overview-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
 }
 
 .notice-panel {
@@ -1547,11 +2047,27 @@ const goToAnnouncements = () => {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 12px;
     margin-top: 18px;
+    content-visibility: auto;
+    contain-intrinsic-size: 420px;
 }
 
 .building-browse-card {
     border-radius: 20px !important;
 }
+
+.building-browse-grid .building-browse-card:nth-child(-n+8) {
+    opacity: 0;
+    animation: demo-panel-rise-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.building-browse-grid .building-browse-card:nth-child(1) { animation-delay: 30ms; }
+.building-browse-grid .building-browse-card:nth-child(2) { animation-delay: 70ms; }
+.building-browse-grid .building-browse-card:nth-child(3) { animation-delay: 110ms; }
+.building-browse-grid .building-browse-card:nth-child(4) { animation-delay: 150ms; }
+.building-browse-grid .building-browse-card:nth-child(5) { animation-delay: 190ms; }
+.building-browse-grid .building-browse-card:nth-child(6) { animation-delay: 230ms; }
+.building-browse-grid .building-browse-card:nth-child(7) { animation-delay: 270ms; }
+.building-browse-grid .building-browse-card:nth-child(8) { animation-delay: 310ms; }
 
 .building-browse-card :deep(.el-card__body) {
     padding: 14px !important;
@@ -1610,8 +2126,714 @@ const goToAnnouncements = () => {
     max-width: 900px;
     margin: 0 auto 20px auto;
 }
-:deep(.el-tabs__header) {
-    margin-bottom: 20px !important;
+
+.search-demo-actions {
+    max-width: 1000px;
+    margin: 0 auto 10px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.search-insight-panel {
+    max-width: 1000px;
+    margin: 0 auto 12px auto;
+}
+
+.search-insight-summary {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-regular);
+}
+
+.search-insight-criteria {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.search-insight-tips {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.search-tip-item {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.best-result-wrap,
+.more-result-wrap {
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.best-result-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0 4px;
+}
+
+.best-result-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.results-grid--search {
+    margin-top: 12px;
+    padding-bottom: 10px;
+    content-visibility: auto;
+    contain-intrinsic-size: 660px;
+}
+
+.results-grid--search :deep(.vibrant-glass-card:nth-child(-n+8)) {
+    opacity: 0;
+    animation: demo-panel-rise-in 0.36s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.results-grid--search :deep(.vibrant-glass-card:nth-child(1)) { animation-delay: 20ms; }
+.results-grid--search :deep(.vibrant-glass-card:nth-child(2)) { animation-delay: 60ms; }
+.results-grid--search :deep(.vibrant-glass-card:nth-child(3)) { animation-delay: 100ms; }
+.results-grid--search :deep(.vibrant-glass-card:nth-child(4)) { animation-delay: 140ms; }
+.results-grid--search :deep(.vibrant-glass-card:nth-child(5)) { animation-delay: 180ms; }
+.results-grid--search :deep(.vibrant-glass-card:nth-child(6)) { animation-delay: 220ms; }
+.results-grid--search :deep(.vibrant-glass-card:nth-child(7)) { animation-delay: 260ms; }
+.results-grid--search :deep(.vibrant-glass-card:nth-child(8)) { animation-delay: 300ms; }
+
+.more-result-wrap {
+    margin-top: 6px;
+}
+
+.more-match-tab {
+    border-radius: 999px !important;
+    background: rgba(255, 255, 255, 0.22) !important;
+    border: 1px solid rgba(255, 255, 255, 0.32) !important;
+    color: var(--text-regular) !important;
+}
+
+.autofill-alert {
+    margin-bottom: 10px;
+    border-radius: 14px;
+}
+
+.search-demo-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.demo-progress-track {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.demo-progress-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    border-radius: 12px;
+    padding: 0 10px;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    color: var(--text-secondary);
+    transition: transform 0.28s ease, background-color 0.28s ease, border-color 0.28s ease, color 0.28s ease;
+}
+
+.demo-progress-item.is-active {
+    transform: translateY(-1px);
+    background: rgba(64, 158, 255, 0.2);
+    border-color: rgba(64, 158, 255, 0.45);
+    color: var(--text-primary);
+}
+
+.demo-progress-item.is-done {
+    background: rgba(56, 196, 124, 0.18);
+    border-color: rgba(56, 196, 124, 0.38);
+    color: var(--text-primary);
+}
+
+.demo-progress-index {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(0, 0, 0, 0.14);
+}
+
+.demo-stage {
+    min-height: 210px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.14);
+    padding: 14px;
+}
+
+.demo-step-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--text-primary);
+}
+
+.demo-search-box {
+    position: relative;
+    min-height: 48px;
+    border-radius: 14px;
+    border: 1px solid rgba(64, 158, 255, 0.4);
+    background: rgba(64, 158, 255, 0.08);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    box-shadow: 0 8px 18px rgba(64, 158, 255, 0.15);
+}
+
+.demo-search-query {
+    line-height: 1.5;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.demo-caret {
+    display: inline-block;
+    width: 2px;
+    height: 16px;
+    border-radius: 2px;
+    background: var(--el-color-primary);
+    animation: demo-caret-blink 1.1s ease-in-out infinite;
+}
+
+.demo-source-line--extract {
+    white-space: normal;
+    position: relative;
+    z-index: 2;
+    min-height: 0;
+    max-height: 140px;
+    overflow: hidden;
+    transform-origin: center top;
+    transition:
+        transform 0.64s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.64s cubic-bezier(0.22, 1, 0.36, 1),
+        filter 0.64s cubic-bezier(0.22, 1, 0.36, 1),
+        max-height 0.64s cubic-bezier(0.22, 1, 0.36, 1),
+        padding 0.64s cubic-bezier(0.22, 1, 0.36, 1),
+        margin 0.64s cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 0.44s ease,
+        box-shadow 0.44s ease;
+    transform: translateY(0);
+    align-items: flex-start;
+    line-height: 1.6;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.demo-search-query--carry {
+    color: var(--text-primary);
+    text-shadow: 0 0 0 rgba(100, 190, 255, 0);
+    transition: text-shadow 0.4s ease, opacity 0.4s ease;
+}
+
+.demo-source-line--extract.is-disintegrating {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(-16px) scale(0.965);
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    border-color: transparent;
+    box-shadow: none;
+}
+
+.demo-source-line--extract.is-disintegrating .demo-search-query--carry {
+    text-shadow: 0 0 18px rgba(106, 195, 255, 0.38);
+}
+
+.demo-extract-stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 230px;
+}
+
+.demo-key-bubble-grid-wrap {
+    margin-top: 16px;
+    min-height: 282px;
+    opacity: 0;
+    transform: translateY(0);
+    transition:
+        opacity 0.42s ease,
+        transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+        margin-top 0.62s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.demo-extract-stage.is-source-gone .demo-key-bubble-grid-wrap {
+    margin-top: 6px;
+    transform: translateY(-8px);
+}
+
+.demo-key-bubble-grid-wrap.is-visible {
+    opacity: 1;
+}
+
+.demo-key-bubble-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.demo-key-bubble-row {
+    display: grid;
+    grid-template-columns: minmax(112px, 180px) 28px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    opacity: 0;
+    filter: blur(0.8px);
+    transform: translate3d(0, var(--demo-split-offset, 0px), 0) scale(0.96);
+    will-change: transform, opacity;
+}
+
+.demo-key-bubble-grid-wrap.is-visible .demo-key-bubble-row {
+    animation: demo-row-split-in 0.68s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: var(--demo-row-delay, 0ms);
+}
+
+.demo-key-bubble-target {
+    border-radius: 12px;
+    padding: 8px 10px;
+    font-size: 11px;
+    line-height: 1.1;
+    color: var(--text-primary);
+    background: rgba(56, 196, 124, 0.16);
+    border: 1px solid rgba(56, 196, 124, 0.4);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+}
+
+.demo-key-bubble-label {
+    color: #9fd1ff;
+    font-weight: 700;
+}
+
+.demo-key-bubble-target {
+    opacity: 0;
+    transform: translateY(2px);
+    justify-self: start;
+    max-width: 100%;
+}
+
+.demo-key-bubble-grid-wrap.is-visible .demo-key-bubble-target {
+    animation: demo-key-target-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: calc(var(--demo-row-delay) + 60ms);
+}
+
+.demo-key-meaning-arrow {
+    height: 1px;
+    background: rgba(159, 209, 255, 0.8);
+    transform-origin: left center;
+    transform: scaleX(0);
+    opacity: 0;
+}
+
+.demo-key-meaning-arrow::after {
+    content: '';
+    position: relative;
+    display: block;
+    width: 0;
+    height: 0;
+    margin-left: auto;
+    margin-top: -3px;
+    border-left: 5px solid rgba(159, 209, 255, 0.84);
+    border-top: 3px solid transparent;
+    border-bottom: 3px solid transparent;
+}
+
+.demo-key-bubble-grid-wrap.is-visible .demo-key-meaning-arrow {
+    animation: demo-arrow-grow 0.42s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: calc(var(--demo-row-delay) + 130ms);
+}
+
+.demo-key-meaning-chip {
+    border-radius: 10px;
+    padding: 6px 10px;
+    font-size: 11px;
+    line-height: 1.2;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    opacity: 0;
+    transform: translateX(-6px);
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.demo-key-bubble-grid-wrap.is-visible .demo-key-meaning-chip {
+    animation: demo-meaning-slide-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: calc(var(--demo-row-delay) + 170ms);
+}
+
+.demo-condense-stage {
+    position: relative;
+    min-height: 196px;
+    border-radius: 14px;
+    overflow: hidden;
+    background: radial-gradient(circle at center, rgba(64, 158, 255, 0.12), rgba(255, 255, 255, 0.06));
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.demo-condense-cloud {
+    position: absolute;
+    inset: 0;
+}
+
+.demo-condense-chip {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 11px;
+    line-height: 1.1;
+    color: var(--text-primary);
+    background: rgba(56, 196, 124, 0.16);
+    border: 1px solid rgba(56, 196, 124, 0.4);
+    transform: translate(calc(-50% + var(--demo-start-x)), calc(-50% + var(--demo-start-y)));
+    animation: demo-condense-to-core 0.76s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: var(--demo-delay, 0ms);
+    will-change: transform, opacity;
+}
+
+.demo-condense-core {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    transform: translate(-50%, -50%) scale(0.5);
+    background: rgba(64, 158, 255, 0.45);
+    filter: blur(1px);
+    opacity: 0;
+}
+
+.demo-condense-core.is-active {
+    animation: demo-core-pulse 0.95s ease-in-out;
+}
+
+.demo-best-card {
+    border-radius: 14px;
+    padding: 12px;
+    background: rgba(64, 158, 255, 0.1);
+    border: 1px solid rgba(64, 158, 255, 0.35);
+    box-shadow: 0 10px 20px rgba(64, 158, 255, 0.14);
+}
+
+.demo-best-card--born {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: min(90%, 480px);
+    transform: translate(-50%, -50%) scale(0.84);
+    animation: demo-card-form 0.52s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.demo-best-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.demo-best-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.demo-best-meta {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.demo-best-tags {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.demo-others-tab {
+    margin-top: 12px;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.demo-break-stage {
+    position: relative;
+    min-height: 260px;
+    border-radius: 14px;
+    overflow: hidden;
+    background: radial-gradient(circle at center, rgba(64, 158, 255, 0.12), rgba(255, 255, 255, 0.05));
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.demo-break-origin-card {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(86%, 420px);
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: rgba(64, 158, 255, 0.14);
+    border: 1px solid rgba(64, 158, 255, 0.4);
+    box-shadow: 0 10px 20px rgba(64, 158, 255, 0.18);
+}
+
+.demo-break-origin-card.is-splitting {
+    animation: demo-card-dissolve 0.58s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.demo-break-origin-card.is-faded {
+    opacity: 0;
+}
+
+.demo-break-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.demo-break-meta {
+    margin-top: 3px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.demo-autofill-burst {
+    position: absolute;
+    inset: 0;
+}
+
+.demo-autofill-item {
+    width: 160px;
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(56, 196, 124, 0.12);
+    border: 1px solid rgba(56, 196, 124, 0.35);
+}
+
+.demo-autofill-item--burst {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+    animation: demo-burst-out 0.72s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: var(--demo-delay, 0ms);
+    --final-x: calc(-50% + var(--demo-burst-x));
+    --final-y: calc(-50% + var(--demo-burst-y));
+}
+
+.demo-autofill-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.demo-autofill-value {
+    margin-top: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.demo-note {
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.demo-flow-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.demo-fade-slide-enter-active,
+.demo-fade-slide-leave-active {
+    transition: opacity 0.42s cubic-bezier(0.22, 1, 0.36, 1), transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.demo-fade-slide-enter-from,
+.demo-fade-slide-leave-to {
+    opacity: 0;
+    transform: translateY(14px);
+}
+
+@keyframes demo-caret-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.15; }
+}
+
+@keyframes demo-panel-rise-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.994);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes demo-row-split-in {
+    0% {
+        opacity: 0;
+        filter: blur(1.8px);
+        transform: translate3d(0, -12px, 0) scale(0.92);
+    }
+    52% {
+        opacity: 1;
+        filter: blur(0.4px);
+        transform: translate3d(0, calc(var(--demo-split-offset, 0px) * 0.38), 0) scale(1.01);
+    }
+    100% {
+        opacity: 1;
+        filter: blur(0);
+        transform: translate3d(0, 0, 0) scale(1);
+    }
+}
+
+@keyframes demo-key-target-in {
+    0% {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes demo-arrow-grow {
+    0% {
+        opacity: 0;
+        transform: scaleX(0);
+    }
+    100% {
+        opacity: 1;
+        transform: scaleX(1);
+    }
+}
+
+@keyframes demo-meaning-slide-in {
+    0% {
+        opacity: 0;
+        transform: translateX(-6px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes demo-condense-to-core {
+    0% {
+        opacity: 1;
+        transform: translate(calc(-50% + var(--demo-start-x)), calc(-50% + var(--demo-start-y))) scale(1);
+    }
+    78% {
+        opacity: 0.9;
+        transform: translate(-50%, -50%) scale(0.55);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.36);
+    }
+}
+
+@keyframes demo-core-pulse {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.5);
+    }
+    38% {
+        opacity: 0.95;
+        transform: translate(-50%, -50%) scale(2.25);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(3.2);
+    }
+}
+
+@keyframes demo-card-form {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.82);
+        filter: blur(4px);
+    }
+    100% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+        filter: blur(0);
+    }
+}
+
+@keyframes demo-card-dissolve {
+    0% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+        filter: blur(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.72);
+        filter: blur(6px);
+    }
+}
+
+@keyframes demo-burst-out {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.76);
+    }
+    100% {
+        opacity: 1;
+        transform: translate(var(--final-x), var(--final-y)) scale(1);
+    }
+}
+
+@keyframes demo-burst-out-mobile {
+    0% {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .attendees-input {
@@ -1745,6 +2967,58 @@ const goToAnnouncements = () => {
     .notice-panel {
         margin-bottom: 16px;
     }
+    .demo-progress-track {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .demo-stage {
+        min-height: auto;
+    }
+    .demo-source-line--extract {
+        max-height: 164px;
+    }
+    .demo-source-line--extract.is-disintegrating {
+        transform: translateY(-10px) scale(0.97);
+    }
+    .demo-key-bubble-grid-wrap {
+        min-height: 296px;
+    }
+    .demo-extract-stage.is-source-gone .demo-key-bubble-grid-wrap {
+        margin-top: 4px;
+        transform: translateY(-4px);
+    }
+    .demo-key-bubble-row {
+        grid-template-columns: 1fr;
+        gap: 5px;
+    }
+    .demo-key-meaning-arrow {
+        display: none;
+    }
+    .demo-key-bubble-target,
+    .demo-key-meaning-chip {
+        white-space: normal;
+        width: 100%;
+        text-align: left;
+    }
+    .demo-condense-stage {
+        min-height: 220px;
+    }
+    .demo-break-stage {
+        min-height: 350px;
+    }
+    .demo-autofill-burst {
+        position: static;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 98px 10px 10px;
+    }
+    .demo-autofill-item--burst {
+        position: static;
+        width: 100%;
+        transform: none;
+        opacity: 0;
+        animation: demo-burst-out-mobile 0.48s ease forwards;
+    }
     .building-panel {
         margin-bottom: 14px;
     }
@@ -1753,6 +3027,11 @@ const goToAnnouncements = () => {
         margin-top: 12px;
         gap: 10px;
     }
+    .building-browse-grid .building-browse-card:nth-child(-n+8),
+    .results-grid--search :deep(.vibrant-glass-card:nth-child(-n+8)) {
+        animation-duration: 0.3s;
+    }
+
     .results-grid {
         margin-top: 20px;
     }
@@ -1792,6 +3071,14 @@ const goToAnnouncements = () => {
     .venue-info-grid {
         grid-template-columns: 1fr;
         gap: 10px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .building-browse-grid .building-browse-card:nth-child(-n+8),
+    .results-grid--search :deep(.vibrant-glass-card:nth-child(-n+8)) {
+        animation: none !important;
+        opacity: 1 !important;
     }
 }
 

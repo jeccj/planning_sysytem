@@ -32,7 +32,9 @@ const fetchAnnouncements = async () => {
     const res = await api.get('/announcements/')
     announcements.value = res.data
   } catch (e) {
-    ElMessage.error('获取公告失败')
+    if (e?.response?.status !== 401) {
+      ElMessage.error('获取公告失败')
+    }
   }
 }
 

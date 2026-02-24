@@ -79,7 +79,7 @@ defineEmits(['book', 'view-detail'])
        If we want the pill to expand the card, we need auto height which flex column provides. 
        Let's keep overflow hidden for the glass effect but ensure height is auto. */
     overflow: hidden;
-    transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: transform 0.36s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.36s cubic-bezier(0.22, 1, 0.36, 1);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -156,11 +156,18 @@ defineEmits(['book', 'view-detail'])
     object-fit: cover;
 }
 
+.text-group {
+    min-width: 0;
+}
+
 .venue-name {
     margin: 0 0 4px 0;
     font-size: 17px;
     font-weight: 700;
     color: #1d1d1f;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .type-pill {
@@ -181,6 +188,18 @@ defineEmits(['book', 'view-detail'])
     color: #1d1d1f;
 }
 
+.info-section .info-pill:last-child {
+    max-width: min(260px, 40vw);
+    min-width: 0;
+}
+
+.info-section .info-pill:last-child span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .micro-tag {
     font-size: 12px;
     opacity: 0.8;
@@ -197,7 +216,7 @@ defineEmits(['book', 'view-detail'])
     justify-content: center;
     color: white;
     font-size: 18px;
-    transition: all 0.3s;
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.28s ease, box-shadow 0.28s ease, color 0.28s ease;
     box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
 }
 
@@ -272,6 +291,13 @@ defineEmits(['book', 'view-detail'])
     
     .d-none-mobile { display: none; }
     .venue-name { font-size: 16px; }
+    .info-section .info-pill:last-child {
+        max-width: 100%;
+    }
+    .info-section .info-pill:last-child span {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
     
     .venue-icon {
         width: 40px;
