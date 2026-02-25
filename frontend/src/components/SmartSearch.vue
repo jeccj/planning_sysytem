@@ -16,6 +16,7 @@ const loading = ref(false)
 const results = ref([])
 const inputRef = ref(null)
 const activeRequestId = ref(0)
+const apiHealth = ref('idle') // idle | ok | degraded | error
 
 const emit = defineEmits(['search-complete', 'update:modelValue'])
 
@@ -42,16 +43,24 @@ const handleSearch = async () => {
     const res = await api.get('/venues/search-smart', { params: { q } })
     if (requestId !== activeRequestId.value) return
     if (Array.isArray(res.data)) {
+      apiHealth.value = 'ok'
       results.value = res.data
       emit('search-complete', results.value, q, { query: q, results: results.value })
       return
     }
+    const defaults = Array.isArray(res.data?.defaults) ? res.data.defaults.map((item) => String(item)) : []
+    const degraded = defaults.some((item) => /(降级|异常|fallback|基础检索)/i.test(item))
+    apiHealth.value = degraded ? 'degraded' : 'ok'
     results.value = Array.isArray(res.data?.results) ? res.data.results : []
     emit('search-complete', results.value, q, res.data)
+    if (degraded) {
+      ElMessage.warning('智能链路异常，已自动切换为基础检索')
+    }
   } catch (error) {
     try {
       const fallbackRes = await api.get('/venues/search', { params: { q } })
       if (requestId !== activeRequestId.value) return
+      apiHealth.value = 'degraded'
       results.value = Array.isArray(fallbackRes.data) ? fallbackRes.data : []
       emit('search-complete', results.value, q, {
         query: q,
@@ -71,6 +80,7 @@ const handleSearch = async () => {
       console.error(fallbackError)
     }
     if (requestId !== activeRequestId.value) return
+    apiHealth.value = 'error'
     console.error(error)
     results.value = []
     emit('search-complete', [], q, {
@@ -121,10 +131,20 @@ defineExpose({
         @keyup.enter="handleSearch"
         />
     </div>
-    <el-button class="glass-search-btn" :loading="loading" @click="handleSearch">
+    <el-button class="glass-search-btn" :class="{ 'is-searching': loading }" :loading="loading" @click="handleSearch">
         <el-icon><Search /></el-icon>
         <span class="btn-text">智能搜索</span>
     </el-button>
+    <transition name="status-fade">
+      <div
+        v-if="apiHealth === 'degraded' || apiHealth === 'error'"
+        class="search-health-hint"
+        :class="`is-${apiHealth}`"
+      >
+        <span class="hint-dot" />
+        <span>{{ apiHealth === 'degraded' ? 'AI 检索暂时降级，当前使用基础检索结果' : 'AI 检索不可用，请稍后重试' }}</span>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -132,6 +152,7 @@ defineExpose({
 .smart-search-container {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
   max-width: 800px;
   margin: 0 auto 2rem auto;
@@ -219,6 +240,91 @@ defineExpose({
     box-shadow: 0 10px 30px rgba(64, 158, 255, 0.3);
 }
 
+.glass-search-btn.is-searching {
+    background: linear-gradient(120deg, rgba(64, 158, 255, 0.18), rgba(103, 194, 58, 0.2)) !important;
+    border-color: rgba(64, 158, 255, 0.6) !important;
+    box-shadow:
+      0 0 0 1px rgba(64, 158, 255, 0.28),
+      0 0 18px rgba(64, 158, 255, 0.34),
+      0 0 34px rgba(103, 194, 58, 0.2);
+    animation: smart-search-glow 1.2s ease-in-out infinite;
+}
+
+.search-health-hint {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    margin-top: -4px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    color: #233043;
+    background: rgba(255, 255, 255, 0.5);
+}
+
+.search-health-hint.is-degraded {
+    border-color: rgba(230, 162, 60, 0.5);
+    background: rgba(230, 162, 60, 0.12);
+}
+
+.search-health-hint.is-error {
+    border-color: rgba(245, 108, 108, 0.56);
+    background: rgba(245, 108, 108, 0.12);
+}
+
+.hint-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #e6a23c;
+    box-shadow: 0 0 9px rgba(230, 162, 60, 0.8);
+}
+
+.search-health-hint.is-error .hint-dot {
+    background: #f56c6c;
+    box-shadow: 0 0 9px rgba(245, 108, 108, 0.8);
+}
+
+.status-fade-enter-active,
+.status-fade-leave-active {
+    transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.status-fade-enter-from,
+.status-fade-leave-to {
+    opacity: 0;
+    transform: translateY(-4px);
+}
+
+@keyframes smart-search-glow {
+    0%, 100% {
+        box-shadow:
+          0 0 0 1px rgba(64, 158, 255, 0.25),
+          0 0 14px rgba(64, 158, 255, 0.3),
+          0 0 30px rgba(103, 194, 58, 0.18);
+    }
+    50% {
+        box-shadow:
+          0 0 0 1px rgba(64, 158, 255, 0.35),
+          0 0 24px rgba(64, 158, 255, 0.42),
+          0 0 42px rgba(103, 194, 58, 0.25);
+    }
+}
+
+@media (hover: none), (pointer: coarse) {
+    .glass-search-btn.is-searching {
+        animation: none;
+        box-shadow:
+          0 0 0 1px rgba(64, 158, 255, 0.2),
+          0 0 10px rgba(64, 158, 255, 0.24);
+    }
+}
+
 .glass-search-btn .el-icon {
     font-size: 18px;
 }
@@ -242,6 +348,20 @@ html.dark .glass-search-btn {
 html.dark .glass-search-btn:hover {
      background: var(--el-color-primary) !important;
      color: white !important;
+}
+
+html.dark .search-health-hint {
+    color: #e4e9f4;
+    background: rgba(21, 24, 31, 0.62);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+html.dark .search-health-hint.is-degraded {
+    background: rgba(230, 162, 60, 0.2);
+}
+
+html.dark .search-health-hint.is-error {
+    background: rgba(245, 108, 108, 0.22);
 }
 
 html.dark .el-input__inner {

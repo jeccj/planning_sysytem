@@ -2,15 +2,20 @@
 import { ref, onMounted } from 'vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { InfoFilled } from '@element-plus/icons-vue'
 import { formatDateTime, getStatusLabel, getStatusType, isUserDismiss } from '../../utils/formatters'
+import { useAuthStore } from '../../stores/auth'
 
 const myReservations = ref([])
+const authStore = useAuthStore()
 
 const fetchMyReservations = async () => {
     try {
         const res = await api.get('/reservations/')
-        myReservations.value = res.data
+        const rows = Array.isArray(res.data) ? res.data : []
+        const currentUserId = Number(authStore.user?.id || 0)
+        myReservations.value = currentUserId > 0
+            ? rows.filter((item) => Number(item?.user_id) === currentUserId)
+            : rows
     } catch (e) { console.error(e) }
 }
 
@@ -78,57 +83,7 @@ const openDetail = (reservation) => {
     </div>
 
     <div class="reservation-table-wrap">
-      <el-table :data="myReservations" style="width: 100%" size="large" class="desktop-table">
-          <el-table-column prop="activity_name" label="活动名称" min-width="150" />
-          <el-table-column prop="organizer_unit" label="主办单位" min-width="120" />
-          <el-table-column label="预约时间" min-width="200">
-                <template #default="scope">
-                    <div class="time-range">
-                        <span>{{ formatDateTime(scope.row.start_time) }}</span>
-                        <span class="time-sep">至</span>
-                        <span>{{ formatDateTime(scope.row.end_time) }}</span>
-                    </div>
-                </template>
-          </el-table-column>
-          <el-table-column prop="attendees_count" label="人数" width="80" />
-          <el-table-column label="状态" width="140">
-                <template #default="scope">
-                    <div class="status-cell">
-                        <el-tag :type="getStatusType(scope.row.status)" effect="dark">
-                            {{ getStatusLabel(scope.row.status) }}
-                        </el-tag>
-                        <el-tooltip v-if="scope.row.status === 'rejected' && scope.row.rejection_reason" :content="scope.row.rejection_reason" placement="top">
-                            <el-icon class="info-icon"><InfoFilled /></el-icon>
-                        </el-tooltip>
-                    </div>
-                </template>
-          </el-table-column>
-          <el-table-column label="AI评分" width="100">
-             <template #default="scope">
-                <el-tag v-if="scope.row.ai_risk_score != null" 
-                    :type="scope.row.ai_risk_score > 70 ? 'danger' : scope.row.ai_risk_score > 30 ? 'warning' : 'success'"
-                    size="small">
-                    {{ scope.row.ai_risk_score }}分
-                </el-tag>
-                <span v-else class="text-gray">--</span>
-             </template>
-          </el-table-column>
-          <el-table-column label="操作" width="150">
-              <template #default="scope">
-                  <el-button size="small" type="primary" plain @click="openDetail(scope.row)">详情</el-button>
-                  <el-button 
-                      v-if="canCancel(scope.row)" 
-                      size="small" 
-                      type="danger" 
-                      plain 
-                      @click="handleCancel(scope.row)"
-                  >取消</el-button>
-              </template>
-          </el-table-column>
-      </el-table>
-      
-      <!-- Mobile Card View -->
-      <div class="mobile-cards">
+      <div class="reservation-cards">
           <el-card v-for="reservation in myReservations" :key="reservation.id" class="reservation-card" shadow="hover">
               <div class="card-header">
                   <h3>{{ reservation.activity_name }}</h3>
@@ -260,27 +215,9 @@ const openDetail = (reservation) => {
     margin: 0;
 }
 
-.time-range {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: 13px;
-}
-
 .time-sep {
     color: #999;
     font-size: 12px;
-}
-
-.status-cell {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.info-icon {
-    color: #e6a23c;
-    cursor: pointer;
 }
 
 .text-gray {
@@ -337,13 +274,128 @@ const openDetail = (reservation) => {
     background: rgba(64, 158, 255, 0.1);
 }
 
-/* Desktop: Show table, hide cards */
-.desktop-table {
-    display: table;
+.reservation-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
-.mobile-cards {
-    display: none;
+.reservation-card {
+    border-radius: 18px !important;
+    background: linear-gradient(
+        135deg,
+        rgba(255, 255, 255, 0.65) 0%,
+        rgba(248, 248, 252, 0.55) 100%
+    ) !important;
+    backdrop-filter: blur(40px) saturate(160%);
+    -webkit-backdrop-filter: blur(40px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.06),
+        0 2px 8px rgba(0, 0, 0, 0.04),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 0.32s ease,
+        border-color 0.32s ease,
+        background 0.32s ease;
+}
+
+.reservation-card:hover {
+    transform: translateY(-2px);
+    box-shadow:
+        0 8px 28px rgba(0, 0, 0, 0.1),
+        0 4px 12px rgba(0, 0, 0, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+}
+
+.reservation-card :deep(.el-card__body) {
+    padding: 16px;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.card-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1d1d1f;
+    flex: 1;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+}
+
+.card-header :deep(.el-tag) {
+    border-radius: 10px !important;
+    padding: 4px 10px !important;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+.card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.card-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.card-row .label {
+    color: #888;
+    font-weight: 500;
+    min-width: 56px;
+    flex-shrink: 0;
+}
+
+.card-row .value {
+    color: #333;
+    flex: 1;
+}
+
+.time-range-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    font-size: 12px;
+    color: #555;
+}
+
+.time-range-mobile .time-sep {
+    color: #999;
+    font-size: 11px;
+}
+
+.card-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.card-actions .el-button {
+    flex: 1;
+    border-radius: 12px !important;
+    font-weight: 500;
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease, background-color 0.24s ease, color 0.24s ease;
+}
+
+.card-actions .el-button:hover {
+    transform: translateY(-1px);
 }
 
 /* Mobile responsive styles */
@@ -352,142 +404,7 @@ const openDetail = (reservation) => {
     .page-header {
         display: none;
     }
-    
-    /* Hide table on mobile, show cards instead */
-    .desktop-table {
-        display: none !important;
-    }
-    
-    .mobile-cards {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-    }
-    
-    /* Card Styles - Enhanced visual design */
-    .reservation-card {
-        border-radius: 18px !important;
-        background: linear-gradient(
-            135deg,
-            rgba(255, 255, 255, 0.65) 0%,
-            rgba(248, 248, 252, 0.55) 100%
-        ) !important;
-        backdrop-filter: blur(40px) saturate(160%);
-        -webkit-backdrop-filter: blur(40px) saturate(160%);
-        border: 1px solid rgba(255, 255, 255, 0.4) !important;
-        
-        /* Layered shadows for depth */
-        box-shadow: 
-            0 4px 20px rgba(0, 0, 0, 0.06),
-            0 2px 8px rgba(0, 0, 0, 0.04),
-            inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
-            
-        transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-            box-shadow 0.32s ease,
-            border-color 0.32s ease,
-            background 0.32s ease;
-    }
-    
-    /* Hover lift effect */
-    .reservation-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 
-            0 8px 28px rgba(0, 0, 0, 0.1),
-            0 4px 12px rgba(0, 0, 0, 0.06),
-            inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
-        border: 1px solid rgba(255, 255, 255, 0.5) !important;
-    }
-    
-    .reservation-card :deep(.el-card__body) {
-        padding: 16px;
-    }
-    
-    .card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 8px;
-        margin-bottom: 12px;
-        padding-bottom: 12px;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-    }
-    
-    .card-header h3 {
-        margin: 0;
-        font-size: 16px;
-        font-weight: 600;
-        color: #1d1d1f;
-        flex: 1;
-        line-height: 1.4;
-        letter-spacing: -0.01em;
-    }
-    
-    /* Card header status tags */
-    .card-header :deep(.el-tag) {
-        border-radius: 10px !important;
-        padding: 4px 10px !important;
-        font-weight: 500;
-        letter-spacing: 0.01em;
-    }
-    
-    .card-body {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-bottom: 12px;
-    }
-    
-    .card-row {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        font-size: 13px;
-    }
-    
-    .card-row .label {
-        color: #888;
-        font-weight: 500;
-        min-width: 56px;
-        flex-shrink: 0;
-    }
-    
-    .card-row .value {
-        color: #333;
-        flex: 1;
-    }
-    
-    .time-range-mobile {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        flex: 1;
-        font-size: 12px;
-        color: #555;
-    }
-    
-    .time-range-mobile .time-sep {
-        color: #999;
-        font-size: 11px;
-    }
-    
-    .card-actions {
-        display: flex;
-        gap: 8px;
-        padding-top: 12px;
-        border-top: 1px solid rgba(0, 0, 0, 0.06);
-    }
-    
-    .card-actions .el-button {
-        flex: 1;
-        border-radius: 12px !important;
-        font-weight: 500;
-        transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease, background-color 0.24s ease, color 0.24s ease;
-    }
-    
-    .card-actions .el-button:hover {
-        transform: translateY(-1px);
-    }
-    
+
     .detail-content {
         grid-template-columns: 1fr !important;
         gap: 12px;

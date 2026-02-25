@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, reactive, watch } from 'vue'
+import { ref, onMounted, reactive, watch, computed } from 'vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -14,6 +14,8 @@ const venuesImportFile = ref(null)
 const importResult = ref(null)
 const configLoaded = ref(false)
 const llmApiKeyConfigured = ref(false)
+const llmSection = ref('connection')
+const expandedPromptPanels = ref(['llm_system_prompt'])
 
 const FRONTEND_PROMPT_DEFAULTS = {
     llm_system_prompt: `你是高校场地预约系统的 AI 助手。请遵守以下要求：
@@ -26,6 +28,10 @@ const FRONTEND_PROMPT_DEFAULTS = {
     llm_parse_intent_rules: `优先提取活动名称、人数、时间范围、楼栋/类型、联系人信息。
 若信息不足，可省略不确定字段，不要臆测。`,
     llm_audit_rules: `对风险判断保持审慎；若缺少关键信息，倾向给出中等风险并说明原因。`,
+    llm_expand_proposal_rules: `请把“活动提案草稿”扩写为结构完整、语气正式、可直接提交审批的中文文本。
+1) 保留原始关键信息，不编造不存在的事实。
+2) 输出 2-4 段，包含活动目的、流程安排、资源与安全说明。
+3) 避免过度夸张、口号式语言，语气简洁专业。`,
 }
 
 const FRONTEND_FIXED_PROMPT_SECTIONS = {
@@ -44,7 +50,7 @@ const FRONTEND_FIXED_PROMPT_SECTIONS = {
     parse_intent_example: `【固定返回示例（不可修改）】
 {"date":"2026-02-24","time_range":["14:00","16:00"],"capacity":80,"facilities":["投影仪","音响"],"keywords":["讲座"],"activity_name":"学术讲座","organizer_unit":"计算机学院","contact_name":"张老师","contact_phone":"13800138000"}`,
     audit_contract: `【固定输出格式（不可修改）】
-请根据“活动提案内容”进行风险评估，并仅返回一个 JSON 对象：
+请根据“活动信息（包含活动、联系人、时间、场地、提案）”进行风险评估，并仅返回一个 JSON 对象：
 - score: 整数，0-100（越高风险越高）
 - reason: 简短中文说明`,
     audit_example: `【固定返回示例（不可修改）】
@@ -76,6 +82,12 @@ const promptMeta = [
         tip: '仅补充规则，固定输出格式与示例由后端锁定。',
         rows: 6,
     },
+    {
+        key: 'llm_expand_proposal_rules',
+        label: '提案扩写补充规则（可编辑）',
+        tip: '控制“提交审批信息 AI 扩写”的文风、结构与约束。',
+        rows: 6,
+    },
 ]
 const fixedPromptMeta = [
     { key: 'parse_intent_contract', label: '意图解析固定输出格式' },
@@ -99,7 +111,11 @@ const config = reactive({
     llm_json_guard_prompt: '',
     llm_parse_intent_rules: '',
     llm_audit_rules: '',
+    llm_expand_proposal_rules: '',
 })
+const editedPromptCount = computed(() => promptKeys.filter(
+    (key) => configLoaded.value && String(config[key] || '') !== String(originalPromptSnapshot.value[key] || ''),
+).length)
 
 const providers = [
     { label: 'Google Gemini', value: 'gemini' },
@@ -402,83 +418,105 @@ onMounted(() => {
                     <span>AI 模型配置</span>
                 </div>
             </template>
-            
-            <el-form label-position="top" label-width="100px">
-                <el-form-item label="AI 服务提供商">
-                    <el-select v-model="config.llm_provider" placeholder="请选择提供商">
-                        <el-option v-for="p in providers" :key="p.value" :label="p.label" :value="p.value" />
-                    </el-select>
-                </el-form-item>
 
-                <el-form-item label="API 密钥 (API Key)">
-                    <el-input
-                        v-model="config.llm_api_key"
-                        type="password"
-                        show-password
-                        :placeholder="llmApiKeyConfigured ? '已配置（安全原因不回显），留空表示不修改' : '请输入 API Key'"
+            <div class="llm-config-shell">
+                <div class="llm-nav-row">
+                    <el-radio-group v-model="llmSection" size="small" class="llm-segmented">
+                        <el-radio-button label="connection">连接配置</el-radio-button>
+                        <el-radio-button label="editable">可编辑提示词</el-radio-button>
+                        <el-radio-button label="fixed">固定区块</el-radio-button>
+                    </el-radio-group>
+                    <span v-if="editedPromptCount > 0" class="llm-nav-tip">已修改 {{ editedPromptCount }} 项提示词</span>
+                </div>
+
+                <el-form v-if="llmSection === 'connection'" label-position="top" label-width="100px">
+                    <el-form-item label="AI 服务提供商">
+                        <el-select v-model="config.llm_provider" placeholder="请选择提供商">
+                            <el-option v-for="p in providers" :key="p.value" :label="p.label" :value="p.value" />
+                        </el-select>
+                    </el-form-item>
+
+                    <el-form-item label="API 密钥 (API Key)">
+                        <el-input
+                            v-model="config.llm_api_key"
+                            type="password"
+                            show-password
+                            :placeholder="llmApiKeyConfigured ? '已配置（安全原因不回显），留空表示不修改' : '请输入 API Key'"
+                        />
+                        <div class="tip">{{ llmApiKeyConfigured ? '当前已配置密钥。仅在输入新值时才会更新。' : '当前未配置密钥。' }}</div>
+                    </el-form-item>
+
+                    <template v-if="config.llm_provider === 'deepseek' || config.llm_provider === 'custom'">
+                        <el-form-item label="接口地址 (Base URL)">
+                            <el-input v-model="config.llm_base_url" placeholder="例如: https://api.deepseek.com" />
+                        </el-form-item>
+
+                        <el-form-item label="模型名称">
+                            <el-input v-model="config.llm_model" placeholder="例如: deepseek-chat" />
+                            <div class="tip">默认值: deepseek-chat</div>
+                        </el-form-item>
+                    </template>
+
+                    <template v-if="config.llm_provider === 'gemini'">
+                        <el-form-item label="模型名称">
+                            <el-input v-model="config.llm_model" placeholder="例如: gemini-2.0-flash-lite" />
+                            <div class="tip">默认值: gemini-2.0-flash-lite</div>
+                        </el-form-item>
+                    </template>
+                </el-form>
+
+                <div v-else-if="llmSection === 'editable'" class="prompt-section">
+                    <el-alert
+                        type="info"
+                        show-icon
+                        :closable="false"
+                        title="提示词已拆分为折叠分组，按需展开编辑。保存时如有变更仍需密码二次确认。"
+                        class="prompt-alert"
                     />
-                    <div class="tip">{{ llmApiKeyConfigured ? '当前已配置密钥。仅在输入新值时才会更新。' : '当前未配置密钥。' }}</div>
-                </el-form-item>
+                    <el-collapse v-model="expandedPromptPanels">
+                        <el-collapse-item
+                            v-for="item in promptMeta"
+                            :key="item.key"
+                            :name="item.key"
+                            class="prompt-collapse-item"
+                        >
+                            <template #title>
+                                <div class="prompt-collapse-title">{{ item.label }}</div>
+                            </template>
+                            <el-input
+                                v-model="config[item.key]"
+                                type="textarea"
+                                :rows="item.rows"
+                                class="prompt-editor"
+                                :placeholder="`请输入${item.label}`"
+                            />
+                            <div class="tip">{{ item.tip }}</div>
+                            <div class="prompt-actions">
+                                <el-button size="small" plain @click="resetPromptToDefault(item.key)">恢复原始提示词</el-button>
+                                <details class="prompt-default-box">
+                                    <summary>查看默认可编辑模板</summary>
+                                    <pre>{{ promptDefaults[item.key] }}</pre>
+                                </details>
+                            </div>
+                        </el-collapse-item>
+                    </el-collapse>
+                </div>
 
-                <!-- DeepSeek / Custom Options -->
-                <template v-if="config.llm_provider === 'deepseek' || config.llm_provider === 'custom'">
-                    <el-form-item label="接口地址 (Base URL)">
-                        <el-input v-model="config.llm_base_url" placeholder="例如: https://api.deepseek.com" />
-                    </el-form-item>
-                    
-                    <el-form-item label="模型名称">
-                        <el-input v-model="config.llm_model" placeholder="例如: deepseek-chat" />
-                        <div class="tip">默认值: deepseek-chat</div>
-                    </el-form-item>
-                </template>
-
-                 <!-- Gemini Options -->
-                 <template v-if="config.llm_provider === 'gemini'">
-                    <el-form-item label="模型名称">
-                        <el-input v-model="config.llm_model" placeholder="例如: gemini-2.0-flash-lite" />
-                        <div class="tip">默认值: gemini-2.0-flash-lite</div>
-                    </el-form-item>
-                </template>
-
-                <el-divider>LLM 提示词配置</el-divider>
-                <el-form-item
-                    v-for="item in promptMeta"
-                    :key="item.key"
-                    :label="item.label"
-                    class="prompt-form-item"
-                >
-                    <el-input
-                        v-model="config[item.key]"
-                        type="textarea"
-                        :rows="item.rows"
-                        class="prompt-editor"
-                        :placeholder="`请输入${item.label}`"
-                    />
-                    <div class="tip">{{ item.tip }}</div>
-                    <div class="prompt-actions">
-                        <el-button size="small" plain @click="resetPromptToDefault(item.key)">恢复原始提示词</el-button>
-                        <details class="prompt-default-box">
-                            <summary>查看默认可编辑模板</summary>
-                            <pre>{{ promptDefaults[item.key] }}</pre>
-                        </details>
+                <div v-else class="prompt-section">
+                    <div class="tip fixed-hint">以下区块由后端锁定，只读展示。</div>
+                    <div class="fixed-grid">
+                        <div v-for="item in fixedPromptMeta" :key="item.key" class="fixed-block-card">
+                            <div class="fixed-block-title">{{ item.label }}</div>
+                            <pre class="prompt-fixed-block">{{ fixedPromptSections[item.key] }}</pre>
+                        </div>
                     </div>
-                </el-form-item>
+                </div>
 
-                <el-divider>固定提示词区块（后端锁定不可修改）</el-divider>
-                <el-form-item
-                    v-for="item in fixedPromptMeta"
-                    :key="item.key"
-                    :label="item.label"
-                    class="prompt-form-item"
-                >
-                    <pre class="prompt-fixed-block">{{ fixedPromptSections[item.key] }}</pre>
-                </el-form-item>
-
-                <el-form-item>
+                <div class="llm-action-row">
                     <el-button type="primary" @click="saveConfig" :loading="loading">保存配置</el-button>
                     <el-button type="success" @click="testConnection" :loading="testing">测试连接</el-button>
-                </el-form-item>
-            </el-form>
+                </div>
+            </div>
         </el-card>
 
         <el-card class="box-card app-panel" shadow="never">
@@ -538,8 +576,103 @@ onMounted(() => {
     margin-top: 4px;
 }
 
-.prompt-form-item {
-    margin-bottom: 18px;
+.llm-config-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.llm-nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.llm-segmented {
+    width: fit-content;
+}
+
+.llm-nav-tip {
+    font-size: 12px;
+    font-weight: 600;
+    color: #606572;
+}
+
+.llm-action-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.prompt-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.prompt-alert {
+    border-radius: 12px;
+}
+
+.prompt-collapse-title {
+    font-weight: 600;
+}
+
+.prompt-section :deep(.el-collapse) {
+    border-top: none;
+    border-bottom: none;
+    background: transparent;
+}
+
+.prompt-section :deep(.el-collapse-item) {
+    border: 1px solid rgba(120, 126, 144, 0.3);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 10px;
+    background: rgba(255, 255, 255, 0.32);
+}
+
+.prompt-section :deep(.el-collapse-item__header) {
+    border-bottom: none;
+    padding: 0 14px;
+    min-height: 44px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.prompt-section :deep(.el-collapse-item__wrap) {
+    border-bottom: none;
+}
+
+.prompt-section :deep(.el-collapse-item__content) {
+    padding: 12px 14px 14px;
+}
+
+.fixed-hint {
+    margin: 0;
+}
+
+.fixed-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+}
+
+.fixed-block-card {
+    border: 1px solid rgba(120, 126, 144, 0.3);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.24);
+}
+
+.fixed-block-title {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #2a2f3a;
 }
 
 .prompt-editor :deep(textarea) {
@@ -610,6 +743,29 @@ html.dark .prompt-default-box {
     border-color: rgba(255, 255, 255, 0.2);
 }
 
+html.dark .llm-nav-tip {
+    color: #d6d9e2;
+}
+
+html.dark .prompt-section :deep(.el-collapse-item) {
+    background: rgba(30, 30, 34, 0.52);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+html.dark .prompt-section :deep(.el-collapse-item__header) {
+    background: rgba(255, 255, 255, 0.06);
+    color: #e6e9f2;
+}
+
+html.dark .fixed-block-card {
+    background: rgba(30, 30, 34, 0.52);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+html.dark .fixed-block-title {
+    color: #dce0ea;
+}
+
 html.dark .prompt-default-box summary,
 html.dark .prompt-default-box pre {
     color: #d6d9e2;
@@ -676,5 +832,24 @@ html.dark .prompt-fixed-block {
 html.dark .llm-status-island {
     background: rgba(30, 30, 34, 0.65);
     border-color: rgba(255, 255, 255, 0.16);
+}
+
+@media (max-width: 768px) {
+    .llm-nav-row {
+        align-items: flex-start;
+    }
+
+    .llm-segmented {
+        width: 100%;
+    }
+
+    .llm-segmented :deep(.el-radio-button),
+    .llm-segmented :deep(.el-radio-button__inner) {
+        width: 100%;
+    }
+
+    .llm-action-row .el-button {
+        width: 100%;
+    }
 }
 </style>

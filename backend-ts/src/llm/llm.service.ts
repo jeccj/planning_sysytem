@@ -4,6 +4,7 @@ import { SystemConfigService } from '../system-config/system-config.service';
 import {
     buildAuditPrompt,
     buildParseIntentPrompt,
+    DEFAULT_LLM_EXPAND_PROPOSAL_RULES,
     DEFAULT_LLM_JSON_GUARD_PROMPT,
     DEFAULT_LLM_AUDIT_RULES,
     DEFAULT_LLM_PARSE_INTENT_RULES,
@@ -50,6 +51,13 @@ export interface VenueSearchInsight {
     tips: string[];
 }
 
+export interface ProposalExpandInput {
+    draft: string;
+    activityName?: string;
+    organizerUnit?: string;
+    attendeesCount?: number;
+}
+
 
 @Injectable()
 export class LlmService {
@@ -61,10 +69,12 @@ export class LlmService {
     private jsonGuardPrompt = DEFAULT_LLM_JSON_GUARD_PROMPT;
     private parseIntentRules = DEFAULT_LLM_PARSE_INTENT_RULES;
     private auditRules = DEFAULT_LLM_AUDIT_RULES;
+    private expandProposalRules = DEFAULT_LLM_EXPAND_PROPOSAL_RULES;
 
     // 配置缓存：避免每次请求都查数据库
     private configCachedAt = 0;
     private readonly CONFIG_TTL_MS = 60_000; // 60 秒缓存
+    private readonly LLM_CALL_TIMEOUT_MS = 12_000;
 
     constructor(
         private configService: SystemConfigService
@@ -84,8 +94,7 @@ export class LlmService {
         this.jsonGuardPrompt = (await this.configService.findByKey('llm_json_guard_prompt') || DEFAULT_LLM_JSON_GUARD_PROMPT).trim();
         this.parseIntentRules = await this.configService.findByKey('llm_parse_intent_rules') || DEFAULT_LLM_PARSE_INTENT_RULES;
         this.auditRules = await this.configService.findByKey('llm_audit_rules') || DEFAULT_LLM_AUDIT_RULES;
-
-        console.log(`[LLM Service] Initializing client. Provider: ${this.provider}, Model: ${this.modelId}`);
+        this.expandProposalRules = await this.configService.findByKey('llm_expand_proposal_rules') || DEFAULT_LLM_EXPAND_PROPOSAL_RULES;
 
         if (!apiKey) {
             console.log('[LLM Service] WARNING: No API Key found, using mock mode.');
@@ -110,7 +119,11 @@ export class LlmService {
                 .map((item) => (item || '').trim())
                 .filter(Boolean)
                 .join('\n\n');
-            const result = await model.generateContent(mergedPrompt);
+            const result = await this.withTimeout(
+                model.generateContent(mergedPrompt),
+                this.LLM_CALL_TIMEOUT_MS,
+                'Gemini generateContent timeout',
+            );
             const response = await result.response;
             return response.text();
         }
@@ -125,18 +138,26 @@ export class LlmService {
             }
             messages.push({ role: 'user', content: prompt });
 
-            const response = await fetch(`${this.openaiClient.baseUrl}/v1/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.openaiClient.apiKey}`,
-                },
-                body: JSON.stringify({
-                    model: this.modelId,
-                    messages,
-                    temperature: 0.1,
-                }),
-            });
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), this.LLM_CALL_TIMEOUT_MS);
+            let response: any;
+            try {
+                response = await fetch(`${this.openaiClient.baseUrl}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.openaiClient.apiKey}`,
+                    },
+                    body: JSON.stringify({
+                        model: this.modelId,
+                        messages,
+                        temperature: 0.1,
+                    }),
+                    signal: controller.signal,
+                });
+            } finally {
+                clearTimeout(timeoutId);
+            }
             const data = await response.json();
             if (data.choices?.length > 0) {
                 return data.choices[0].message.content;
@@ -145,6 +166,24 @@ export class LlmService {
         }
 
         throw new Error('No valid client initialized');
+    }
+
+    private withTimeout<T>(task: Promise<T>, ms: number, timeoutMessage: string): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                reject(new Error(timeoutMessage));
+            }, ms);
+
+            task
+                .then((result) => {
+                    clearTimeout(timer);
+                    resolve(result);
+                })
+                .catch((error) => {
+                    clearTimeout(timer);
+                    reject(error);
+                });
+        });
     }
 
     /** 从 LLM 原始响应中提取 JSON 对象 */
@@ -194,7 +233,6 @@ export class LlmService {
 
         try {
             const rawText = await this.callLlm(prompt);
-            console.log(`[LLM Service] Raw Response (${this.provider}): ${rawText}`);
             const parsed = this.extractJson<IntentResult>(rawText);
             const building = this.extractBuildingKeyword(text);
 
@@ -281,8 +319,6 @@ export class LlmService {
 
             const building = this.extractBuildingKeyword(text);
 
-            console.log('[Mock LLM Debug]', { activity_name, organizer_unit, contact_name, contact_phone });
-
             const fallbackKeywords = [text];
             if (building && !fallbackKeywords.includes(building)) {
                 fallbackKeywords.push(building);
@@ -322,6 +358,47 @@ export class LlmService {
             }
             return { score: 10, reason: 'Low risk. Standard academic event.' };
         }
+    }
+
+    async expandProposal(input: ProposalExpandInput): Promise<{ expanded_text: string }> {
+        await this.initClient();
+
+        const rawDraft = String(input?.draft || '').trim();
+        if (!rawDraft) {
+            return { expanded_text: '' };
+        }
+
+        const expandRules = String(this.expandProposalRules || '').trim();
+        const prompt = [
+            '你是高校场地预约系统的文案优化助手。',
+            expandRules ? `【管理员可编辑补充规则】\n${expandRules}` : '',
+            '【固定输出格式（不可修改）】',
+            '只返回一个 JSON 对象，格式必须是：{"expanded_text":"..."}。',
+            '仅输出 JSON，不要额外解释。',
+            `活动名称：${String(input?.activityName || '').trim() || '未提供'}`,
+            `主办单位：${String(input?.organizerUnit || '').trim() || '未提供'}`,
+            `预计人数：${Number.isFinite(Number(input?.attendeesCount)) ? Number(input?.attendeesCount) : '未提供'}`,
+            `活动提案草稿：${rawDraft}`,
+        ].filter(Boolean).join('\n\n');
+
+        try {
+            const raw = await this.callLlm(prompt);
+            const parsed = this.extractJson<{ expanded_text?: string }>(raw);
+            const text = String(parsed?.expanded_text || '').trim();
+            if (text) {
+                return { expanded_text: text };
+            }
+        } catch (error) {
+            console.log(`[LLM Service] expandProposal fallback (${this.provider}): ${error}`);
+        }
+
+        const fallback = [
+            `本次活动主题为“${String(input?.activityName || '未命名活动').trim()}”，由${String(input?.organizerUnit || '相关组织').trim()}发起，预计参与人数约 ${Number.isFinite(Number(input?.attendeesCount)) ? Number(input?.attendeesCount) : '若干'} 人。`,
+            `活动目标是围绕既定主题开展交流与实践，提升参与者的知识掌握与协作能力。活动期间将由负责人统筹签到、分工和流程推进，确保整体秩序稳定、环节衔接清晰。`,
+            `在实施过程中，将根据现场条件准备必要物资并安排人员维护秩序。若出现临时调整，将及时通知参与者并执行应急预案，确保活动安全、规范、有序完成。`,
+            `草稿原文补充：${rawDraft}`,
+        ].join('\n\n');
+        return { expanded_text: fallback };
     }
 
     private buildSearchCriteria(intent: IntentResult, assumptions: string[] = []): string[] {

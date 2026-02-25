@@ -5,7 +5,7 @@ import { useAuthStore } from '../../stores/auth'
 import SmartSearch from '../../components/SmartSearch.vue'
 import api from '../../api/axios'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, Filter, View, Location, Clock, DataAnalysis } from '@element-plus/icons-vue'
+import { ArrowRight, Filter, View, Location, Clock, DataAnalysis, Edit } from '@element-plus/icons-vue'
 import VenueCard from '../../components/VenueCard.vue'
 import { formatTime, getNoticePreview, getVenueBuildingName, isUserDismiss } from '../../utils/formatters'
 import { hasSearchDemoAutoShown, markSearchDemoAutoShown } from '../../utils/client-flags'
@@ -19,6 +19,11 @@ const latestAnnouncement = ref(null)
 const buildingLoading = ref(false)
 const selectedBuildingForBoard = ref('')
 const buildingFallbackNotified = ref(false)
+const lastVenuesFetchAt = ref(0)
+const lastBuildingFetchAt = ref(0)
+const lastBuildingFetchName = ref('')
+const VENUES_CACHE_TTL_MS = 30_000
+const BUILDING_CACHE_TTL_MS = 15_000
 const classroomTypeSet = new Set(['Classroom', '教室'])
 const buildingAvailability = ref({
     selected_building: null,
@@ -245,11 +250,38 @@ const resetSearchDemoFlow = (targetStep = 1) => {
     demoBreakdownPhase.value = 'idle'
 }
 
+const getDemoRadiusProfile = () => {
+    const width = typeof window === 'undefined' ? 1200 : Math.max(320, Number(window.innerWidth || 1200))
+    if (width <= 430) {
+        return {
+            condenseX: 96,
+            condenseY: 52,
+            burstX: 94,
+            burstY: 50,
+        }
+    }
+    if (width <= 768) {
+        return {
+            condenseX: 124,
+            condenseY: 66,
+            burstX: 118,
+            burstY: 62,
+        }
+    }
+    return {
+        condenseX: 170,
+        condenseY: 88,
+        burstX: 165,
+        burstY: 84,
+    }
+}
+
 const getCondenseChipStyle = (index, total) => {
     if (!total) return {}
     const angle = (Math.PI * 2 * index) / total
-    const radiusX = 170
-    const radiusY = 88
+    const profile = getDemoRadiusProfile()
+    const radiusX = profile.condenseX
+    const radiusY = profile.condenseY
     const x = Math.cos(angle) * radiusX
     const y = Math.sin(angle) * radiusY
     return {
@@ -262,8 +294,9 @@ const getCondenseChipStyle = (index, total) => {
 const getAutofillBurstStyle = (index, total) => {
     if (!total) return {}
     const angle = (-Math.PI / 2) + (Math.PI * 2 * index) / total
-    const radiusX = 165
-    const radiusY = 84
+    const profile = getDemoRadiusProfile()
+    const radiusX = profile.burstX
+    const radiusY = profile.burstY
     const x = Math.cos(angle) * radiusX
     const y = Math.sin(angle) * radiusY
     return {
@@ -486,10 +519,15 @@ const openBrowseBuilding = (buildingName) => {
     showBuildingVenueDialog.value = true
 }
 
-const fetchAllVenues = async () => {
+const fetchAllVenues = async (force = false) => {
+    const now = Date.now()
+    if (!force && allVenues.value.length > 0 && now - lastVenuesFetchAt.value < VENUES_CACHE_TTL_MS) {
+        return
+    }
     try {
         const res = await api.get('/venues/')
         allVenues.value = res.data
+        lastVenuesFetchAt.value = Date.now()
         if (buildingAvailability.value.summary.total_buildings === 0) {
             const fallback = buildBuildingAvailabilityFromVenues(allVenues.value, selectedBuildingForBoard.value)
             buildingAvailability.value = fallback
@@ -498,19 +536,34 @@ const fetchAllVenues = async () => {
     } catch (e) { ElMessage.error("获取列表失败") }
 }
 
-const fetchBuildingAvailability = async (buildingName = selectedBuildingForBoard.value) => {
+const fetchBuildingAvailability = async (buildingName = selectedBuildingForBoard.value, force = false) => {
+    const now = Date.now()
+    const normalizedBuildingName = String(buildingName || '')
+    if (
+        !force &&
+        buildingAvailability.value.summary.total_buildings > 0 &&
+        normalizedBuildingName === String(lastBuildingFetchName.value || '') &&
+        now - lastBuildingFetchAt.value < BUILDING_CACHE_TTL_MS
+    ) {
+        return
+    }
+
     buildingLoading.value = true
     try {
         const params = buildingName ? { building: buildingName } : {}
         const res = await api.get('/venues/building-availability', { params })
         buildingAvailability.value = res.data
         selectedBuildingForBoard.value = res.data.selected_building || ''
+        lastBuildingFetchAt.value = Date.now()
+        lastBuildingFetchName.value = normalizedBuildingName
     } catch (e) {
         try {
             const sourceVenues = allVenues.value.length > 0 ? allVenues.value : (await api.get('/venues/')).data || []
             const fallback = buildBuildingAvailabilityFromVenues(sourceVenues, buildingName)
             buildingAvailability.value = fallback
             selectedBuildingForBoard.value = fallback.selected_building || ''
+            lastBuildingFetchAt.value = Date.now()
+            lastBuildingFetchName.value = normalizedBuildingName
             if (!buildingFallbackNotified.value && e?.response?.status !== 404) {
                 const code = e?.response?.status
                 ElMessage.warning(code ? `楼栋空闲接口异常(${code})，已切换本地数据` : '楼栋空闲接口异常，已切换本地数据')
@@ -588,6 +641,7 @@ const handleSearchDemoBeforeClose = (done) => {
 
 // Natural Language Booking Logic
 const parsedIntent = ref({})
+const nlpFallbackWarned = ref(false)
 
 const extractBuildingFromQuery = (queryText) => {
     const text = String(queryText || '').trim()
@@ -627,9 +681,16 @@ const handleSearchResults = async (results, query, searchMeta = null) => {
         try {
             const nlpRes = await api.post('/nlp/parse', { query })
             const hasData = nlpRes.data && Object.values(nlpRes.data).some(val => val !== null && val !== '')
-            if (hasData) intent = nlpRes.data
+            if (hasData) {
+                intent = nlpRes.data
+                nlpFallbackWarned.value = false
+            }
         } catch (e) {
             console.error('NLP Backend unavailable, fallback to local parse', e)
+            if (!nlpFallbackWarned.value) {
+                ElMessage.warning('智能解析暂时不可用，已切换基础匹配逻辑')
+                nlpFallbackWarned.value = true
+            }
         }
     }
 
@@ -751,6 +812,8 @@ const reservationForm = ref({
     end_time_input: ''
 })
 const showProposalModal = ref(false)
+const proposalAiExpanding = ref(false)
+const proposalExpandToken = ref(0)
 const bookingMode = ref('single')
 const batchAllOrNothing = ref(true)
 
@@ -1034,12 +1097,49 @@ const clearBookingFormState = () => {
     showModal.value = false
     parsedIntent.value = {}
     autoFilledFields.value = []
+    proposalAiExpanding.value = false
+    proposalExpandToken.value += 1
     selectedFile.value = null
     fileList.value = []
     bookingMode.value = 'single'
     batchSlots.value = [createEmptyBatchSlot()]
     batchAllOrNothing.value = true
     recurringRule.value = createDefaultRecurringRule()
+}
+
+const handleAiExpandProposal = async () => {
+    if (proposalAiExpanding.value) return
+    const draft = String(reservationForm.value.proposal_content || reservationForm.value.activity_description || '').trim()
+    if (!draft) {
+        ElMessage.warning('请先输入提案或活动说明，再使用 AI 扩写')
+        return
+    }
+
+    const token = proposalExpandToken.value + 1
+    proposalExpandToken.value = token
+    proposalAiExpanding.value = true
+    try {
+        const res = await api.post('/nlp/expand-proposal', {
+            draft,
+            activity_name: reservationForm.value.activity_name,
+            organizer_unit: reservationForm.value.organizer_unit,
+            attendees_count: reservationForm.value.attendees_count,
+        })
+        if (token !== proposalExpandToken.value) return
+        const expanded = String(res?.data?.expanded_text || '').trim()
+        if (!expanded) {
+            throw new Error('expand-empty')
+        }
+        reservationForm.value.proposal_content = expanded
+        ElMessage.success('AI 扩写完成，请确认后提交')
+    } catch (e) {
+        console.error(e)
+        ElMessage.error('AI 扩写失败，请稍后重试')
+    } finally {
+        if (token === proposalExpandToken.value) {
+            proposalAiExpanding.value = false
+        }
+    }
 }
 
 const submitSingleBooking = async () => {
@@ -1410,7 +1510,7 @@ const goToAnnouncements = () => {
         v-model="showBuildingVenueDialog"
         :title="`${selectedBrowseBuilding} · 场馆列表`"
         width="760px"
-        class="glass-dialog"
+        class="glass-dialog building-venues-dialog"
         align-center
         append-to-body
     >
@@ -1430,7 +1530,7 @@ const goToAnnouncements = () => {
     </el-dialog>
 
     <!-- BOOKING DIALOG: PILL STACK SYSTEM -->
-    <el-dialog v-model="showModal" title="预约场馆申请" width="600px" class="glass-dialog" align-center append-to-body>
+    <el-dialog v-model="showModal" title="预约场馆申请" width="600px" class="glass-dialog booking-dialog" align-center append-to-body>
         <el-form :model="reservationForm">
             <el-alert
                 v-if="autoFilledFields.length > 0"
@@ -1441,7 +1541,7 @@ const goToAnnouncements = () => {
                 :title="`已根据智能搜索自动填入：${autoFilledFields.join('、')}`"
             />
             <div class="form-pill">
-                <el-form-item label="预约模式">
+                <el-form-item label="预约模式" class="booking-mode-item">
                     <el-radio-group v-model="bookingMode" size="small" class="booking-mode-group" @change="syncAdvancedModeSeed">
                         <el-radio-button label="single">单次</el-radio-button>
                         <el-radio-button label="batch">批量</el-radio-button>
@@ -1496,12 +1596,12 @@ const goToAnnouncements = () => {
                 </el-form-item>
             </div>
             <div v-if="bookingMode !== 'batch'" class="form-pill">
-                <el-form-item :label="bookingMode === 'recurring' ? '首个预约时间' : '预约时间'">
+                <el-form-item :label="bookingMode === 'recurring' ? '首个预约时间' : '预约时间'" class="booking-time-item">
                     <div class="datetime-range">
                         <el-date-picker
                             v-model="reservationForm.date"
                             type="date"
-                            placeholder="选择日期"
+                            placeholder="日期"
                             value-format="YYYY-MM-DD"
                             format="YYYY-MM-DD"
                             class="date-input"
@@ -1510,7 +1610,7 @@ const goToAnnouncements = () => {
                         <span class="time-separator">/</span>
                         <el-time-picker
                             v-model="reservationForm.start_time_input"
-                            placeholder="开始时间"
+                            placeholder="开始"
                             value-format="HH:mm"
                             format="HH:mm"
                             class="time-input start"
@@ -1519,7 +1619,7 @@ const goToAnnouncements = () => {
                         <span class="time-separator">-</span>
                         <el-time-picker
                             v-model="reservationForm.end_time_input"
-                            placeholder="结束时间"
+                            placeholder="结束"
                             value-format="HH:mm"
                             format="HH:mm"
                             class="time-input end"
@@ -1651,9 +1751,24 @@ const goToAnnouncements = () => {
     </el-dialog>
 
     <el-dialog v-model="showProposalModal" title="补充提案详情" width="500px" class="glass-dialog spatial-modal" align-center append-to-body>
-        <div class="form-pill pill-stack">
+        <div class="proposal-tools">
+            <el-button
+                class="writing-tool-btn"
+                :class="{ 'is-working': proposalAiExpanding }"
+                :loading="proposalAiExpanding"
+                @click="handleAiExpandProposal"
+            >
+                <el-icon><Edit /></el-icon>
+                <span>{{ proposalAiExpanding ? 'AI 正在润色...' : 'AI 扩写' }}</span>
+            </el-button>
+            <span class="proposal-tools-tip">输入关键点后可一键生成更完整审批文案</span>
+        </div>
+        <div class="form-pill pill-stack" :class="{ 'is-ai-working': proposalAiExpanding }">
             <el-form-item label="详细说明" label-position="top">
-                <el-input v-model="reservationForm.proposal_content" type="textarea" :rows="8" placeholder="描述流程、物资需求等..." />
+                <div class="proposal-editor-shell" :class="{ 'is-working': proposalAiExpanding }">
+                    <el-input v-model="reservationForm.proposal_content" type="textarea" :rows="8" placeholder="描述流程、物资需求等..." />
+                    <div v-if="proposalAiExpanding" class="proposal-glow-ring" aria-hidden="true" />
+                </div>
             </el-form-item>
         </div>
         <template #footer>
@@ -1742,7 +1857,7 @@ const goToAnnouncements = () => {
         v-model="showSearchDemoDialog"
         title="智能搜索演示"
         width="620px"
-        class="glass-dialog"
+        class="glass-dialog search-demo-dialog"
         align-center
         append-to-body
         :before-close="handleSearchDemoBeforeClose"
@@ -2122,6 +2237,17 @@ const goToAnnouncements = () => {
     margin-left: auto;
     margin-right: auto;
 }
+
+.building-venues-dialog :deep(.el-dialog__body) {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+}
+
+.building-venues-dialog .results-grid {
+    margin-top: 8px;
+    padding-bottom: 12px;
+    max-width: 100%;
+}
 .search-island {
     max-width: 900px;
     margin: 0 auto 20px auto;
@@ -2220,10 +2346,35 @@ const goToAnnouncements = () => {
     border-radius: 14px;
 }
 
+.booking-dialog :deep(.el-dialog__body) {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+    touch-action: pan-y;
+}
+
+.booking-dialog :deep(.el-form),
+.booking-dialog :deep(.el-form-item__content),
+.booking-dialog .datetime-range,
+.booking-dialog .batch-slot-list,
+.booking-dialog .batch-slot-row,
+.booking-dialog .recurring-config {
+    min-width: 0;
+}
+
+.booking-dialog :deep(.el-alert__title) {
+    white-space: normal;
+    word-break: break-word;
+}
+
 .search-demo-shell {
     display: flex;
     flex-direction: column;
     gap: 12px;
+}
+
+.search-demo-dialog :deep(.el-dialog__body) {
+    max-height: min(72dvh, 680px);
+    overflow-y: auto;
 }
 
 .demo-progress-track {
@@ -2836,6 +2987,35 @@ const goToAnnouncements = () => {
     }
 }
 
+@keyframes writing-tool-glow {
+    0%, 100% {
+        box-shadow:
+            0 0 10px rgba(64, 158, 255, 0.28),
+            0 0 20px rgba(56, 196, 124, 0.18);
+    }
+    50% {
+        box-shadow:
+            0 0 16px rgba(64, 158, 255, 0.42),
+            0 0 30px rgba(56, 196, 124, 0.26);
+    }
+}
+
+@keyframes proposal-ring-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes proposal-ring-breathe {
+    0%, 100% {
+        opacity: 0.55;
+        transform: scale(0.992);
+    }
+    50% {
+        opacity: 0.86;
+        transform: scale(1.008);
+    }
+}
+
 .attendees-input {
     width: 100%;
 }
@@ -2844,8 +3024,23 @@ const goToAnnouncements = () => {
     width: 100%;
 }
 
+.booking-mode-group :deep(.el-radio-group) {
+    display: flex;
+    width: 100%;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.booking-mode-group :deep(.el-radio-button) {
+    flex: 1 1 82px;
+    min-width: 0;
+}
+
 .booking-mode-group :deep(.el-radio-button__inner) {
+    width: 100%;
     border-radius: 999px !important;
+    padding: 0 10px !important;
+    white-space: nowrap;
 }
 
 .batch-slot-list {
@@ -2860,6 +3055,10 @@ const goToAnnouncements = () => {
     grid-template-columns: minmax(110px, 1.2fr) minmax(76px, 1fr) minmax(76px, 1fr) auto;
     gap: 6px;
     align-items: center;
+}
+
+.batch-slot-row > * {
+    min-width: 0;
 }
 
 .batch-actions {
@@ -2947,6 +3146,101 @@ const goToAnnouncements = () => {
     gap: 12px;
 }
 
+.proposal-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.proposal-tools-tip {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.writing-tool-btn {
+    border-radius: 999px !important;
+    padding: 0 16px !important;
+    min-height: 34px;
+}
+
+.writing-tool-btn.is-working {
+    background: linear-gradient(120deg, rgba(64, 158, 255, 0.2), rgba(56, 196, 124, 0.22)) !important;
+    border-color: rgba(64, 158, 255, 0.5) !important;
+    box-shadow:
+        0 0 12px rgba(64, 158, 255, 0.36),
+        0 0 24px rgba(56, 196, 124, 0.25);
+    animation: writing-tool-glow 1.2s ease-in-out infinite;
+}
+
+.form-pill.pill-stack {
+    position: relative;
+    overflow: visible;
+}
+
+.proposal-editor-shell {
+    position: relative;
+    width: 100%;
+    isolation: isolate;
+}
+
+.proposal-editor-shell :deep(.el-textarea__inner) {
+    position: relative;
+    z-index: 2;
+    border-radius: 16px !important;
+}
+
+.proposal-editor-shell.is-working :deep(.el-textarea__inner) {
+    border-color: rgba(64, 158, 255, 0.72) !important;
+    box-shadow:
+        0 0 0 1px rgba(64, 158, 255, 0.22) inset,
+        0 0 0 4px rgba(64, 158, 255, 0.12),
+        0 0 24px rgba(74, 170, 255, 0.26) !important;
+}
+
+.proposal-glow-ring {
+    position: absolute;
+    inset: -6px;
+    pointer-events: none;
+    border-radius: 20px;
+    z-index: 1;
+}
+
+.proposal-glow-ring::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px;
+    background: conic-gradient(
+        from 0deg,
+        rgba(64, 158, 255, 0.16) 0deg,
+        rgba(64, 158, 255, 0.8) 70deg,
+        rgba(153, 234, 255, 0.92) 132deg,
+        rgba(103, 194, 58, 0.42) 198deg,
+        rgba(64, 158, 255, 0.22) 360deg
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: proposal-ring-spin 2.05s linear infinite;
+}
+
+.proposal-glow-ring::after {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    background:
+        radial-gradient(70% 88% at 20% 50%, rgba(108, 188, 255, 0.34), transparent 68%),
+        radial-gradient(66% 84% at 82% 52%, rgba(103, 194, 58, 0.22), transparent 72%);
+    filter: blur(10px);
+    animation: proposal-ring-breathe 1.4s ease-in-out infinite;
+}
+
 @media (max-width: 1200px) {
     .results-grid {
         margin-top: 26px;
@@ -2967,11 +3261,24 @@ const goToAnnouncements = () => {
     .notice-panel {
         margin-bottom: 16px;
     }
+
+    .search-demo-dialog :deep(.el-dialog__body) {
+        max-height: calc(100dvh - 210px);
+        padding: 10px 12px !important;
+    }
+
+    .search-demo-shell {
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
+    }
+
     .demo-progress-track {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .demo-stage {
         min-height: auto;
+        padding: 10px;
     }
     .demo-source-line--extract {
         max-height: 164px;
@@ -2980,7 +3287,7 @@ const goToAnnouncements = () => {
         transform: translateY(-10px) scale(0.97);
     }
     .demo-key-bubble-grid-wrap {
-        min-height: 296px;
+        min-height: 248px;
     }
     .demo-extract-stage.is-source-gone .demo-key-bubble-grid-wrap {
         margin-top: 4px;
@@ -3000,32 +3307,30 @@ const goToAnnouncements = () => {
         text-align: left;
     }
     .demo-condense-stage {
-        min-height: 220px;
+        min-height: 208px;
     }
     .demo-break-stage {
-        min-height: 350px;
+        min-height: 272px;
     }
-    .demo-autofill-burst {
-        position: static;
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 8px;
-        padding: 98px 10px 10px;
-    }
-    .demo-autofill-item--burst {
-        position: static;
-        width: 100%;
-        transform: none;
-        opacity: 0;
-        animation: demo-burst-out-mobile 0.48s ease forwards;
+    .demo-autofill-item {
+        width: clamp(112px, 31vw, 146px);
+        padding: 8px;
     }
     .building-panel {
         margin-bottom: 14px;
+    }
+    .building-venues-dialog :deep(.el-dialog__body) {
+        padding: 8px 10px 10px !important;
     }
     .building-browse-grid {
         grid-template-columns: 1fr;
         margin-top: 12px;
         gap: 10px;
+    }
+    .building-browse-grid,
+    .results-grid--search {
+        content-visibility: visible;
+        contain-intrinsic-size: auto;
     }
     .building-browse-grid .building-browse-card:nth-child(-n+8),
     .results-grid--search :deep(.vibrant-glass-card:nth-child(-n+8)) {
@@ -3045,9 +3350,184 @@ const goToAnnouncements = () => {
         flex-direction: column;
         gap: 0;
     }
-    .batch-slot-row {
+
+    .proposal-tools {
+        align-items: flex-start;
+    }
+
+    .writing-tool-btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .proposal-tools-tip {
+        width: 100%;
+    }
+
+    .booking-dialog :deep(.form-pill) {
+        padding: 8px 10px;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item) {
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 8px;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item__label) {
+        flex: 0 0 82px !important;
+        width: 82px !important;
+        padding-right: 8px !important;
+        line-height: 1.28 !important;
+        white-space: nowrap !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item__content) {
+        width: auto !important;
+        min-width: 0 !important;
+        overflow-x: visible !important;
+        flex-wrap: wrap !important;
+    }
+
+    .booking-dialog .datetime-range {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+        gap: 4px;
+        align-items: center;
+    }
+
+    .booking-dialog .date-input {
+        width: 100%;
+    }
+
+    .booking-dialog .time-input {
+        width: 100%;
+    }
+
+    .booking-dialog .time-separator {
+        margin: 0;
+        text-align: center;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item) {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item .el-form-item__label) {
+        width: 100% !important;
+        flex: none !important;
+        padding-right: 0 !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item .el-form-item__content) {
+        width: 100% !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item .el-radio-group.booking-mode-group) {
+        display: grid;
+        grid-template-columns: 1fr;
+        width: 100%;
+        gap: 8px;
+        max-width: 100%;
+        overflow: visible;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item .booking-mode-group .el-radio-button) {
+        width: 100%;
+        min-width: 0;
+        flex: none;
+        margin-left: 0 !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item .booking-mode-group .el-radio-button__inner) {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        text-align: center;
+        padding: 0 12px !important;
+        min-height: 36px !important;
+        line-height: 34px !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        border-radius: 999px !important;
+        border: 1px solid rgba(194, 199, 210, 0.95) !important;
+        box-shadow: none !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item .booking-mode-group .el-radio-button:not(:first-child) .el-radio-button__inner) {
+        border-left: 1px solid rgba(194, 199, 210, 0.95) !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item .booking-mode-group .el-radio-button::before) {
+        display: none !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-mode-item .booking-mode-group .el-radio-button__original-radio:checked + .el-radio-button__inner) {
+        border-color: rgba(88, 100, 210, 0.96) !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-time-item) {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-time-item .el-form-item__label) {
+        width: 100% !important;
+        flex: none !important;
+        padding-right: 0 !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-time-item .el-form-item__content) {
+        width: 100% !important;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-time-item .datetime-range) {
         grid-template-columns: 1fr;
         gap: 8px;
+        max-width: 100%;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item.booking-time-item .time-separator) {
+        display: none;
+    }
+
+    .booking-dialog {
+        --booking-mobile-font-size: 16px;
+    }
+
+    .booking-dialog :deep(.form-pill .el-form-item__label) {
+        font-size: var(--booking-mobile-font-size) !important;
+    }
+
+    .booking-dialog :deep(:is(
+        .el-input__inner,
+        .el-textarea__inner,
+        .el-input-number .el-input__inner,
+        .pill-button-trigger span,
+        .upload-demo .el-button,
+        .booking-mode-group .el-radio-button__inner
+    )) {
+        font-size: var(--booking-mobile-font-size) !important;
+    }
+
+    .booking-dialog :deep(.el-dialog__footer .el-button) {
+        font-size: var(--booking-mobile-font-size) !important;
+    }
+
+    .booking-dialog .batch-slot-row {
+        grid-template-columns: minmax(96px, 1.12fr) minmax(66px, 1fr) minmax(66px, 1fr) auto;
+        gap: 5px;
+    }
+
+    .booking-dialog .batch-slot-row :deep(.el-button) {
+        padding: 0 8px !important;
     }
 
     .filter-form {
@@ -3079,6 +3559,76 @@ const goToAnnouncements = () => {
     .results-grid--search :deep(.vibrant-glass-card:nth-child(-n+8)) {
         animation: none !important;
         opacity: 1 !important;
+    }
+}
+
+@media (hover: none), (pointer: coarse) {
+    .building-browse-grid .building-browse-card:nth-child(-n+8),
+    .results-grid--search :deep(.vibrant-glass-card:nth-child(-n+8)),
+    .writing-tool-btn.is-working,
+    .proposal-glow-ring::before,
+    .proposal-glow-ring::after {
+        animation: none !important;
+    }
+
+    .building-browse-grid .building-browse-card:nth-child(-n+8),
+    .results-grid--search :deep(.vibrant-glass-card:nth-child(-n+8)) {
+        opacity: 1 !important;
+        transform: none !important;
+    }
+}
+
+@media (max-width: 430px) {
+    .search-demo-dialog :deep(.el-dialog__body) {
+        max-height: calc(100dvh - 186px);
+    }
+
+    .search-demo-shell { max-height: none; }
+
+    .demo-progress-item {
+        min-height: 30px;
+        padding: 0 8px;
+        font-size: 11px;
+    }
+
+    .demo-condense-stage { min-height: 188px; }
+    .demo-break-stage { min-height: 244px; }
+    .demo-autofill-item { width: clamp(98px, 30vw, 130px); }
+}
+
+@media (max-width: 768px) and (orientation: portrait) {
+    .search-demo-dialog :deep(.el-dialog__body) {
+        max-height: calc(100dvh - 176px);
+        overflow-y: auto;
+    }
+
+    .search-demo-shell {
+        max-height: none !important;
+        overflow: visible !important;
+    }
+
+    .demo-stage { padding: 10px; }
+    .demo-extract-stage { min-height: 0; }
+    .demo-key-bubble-grid-wrap {
+        min-height: 232px;
+        margin-top: 10px;
+    }
+    .demo-condense-stage { min-height: 196px; }
+    .demo-break-stage { min-height: 248px; }
+    .demo-best-card--born { width: min(92%, 380px); }
+    .demo-break-origin-card { width: min(90%, 340px); }
+    .demo-condense-chip {
+        font-size: 10px;
+        padding: 5px 8px;
+    }
+    .demo-autofill-item {
+        width: clamp(104px, 30vw, 136px);
+        padding: 8px;
+    }
+    .demo-autofill-label { font-size: 11px; }
+    .demo-autofill-value {
+        font-size: 12px;
+        margin-top: 3px;
     }
 }
 

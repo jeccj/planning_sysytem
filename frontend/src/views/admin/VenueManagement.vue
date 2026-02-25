@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, Plus, ZoomIn, Delete } from '@element-plus/icons-vue'
+import { ArrowDown, Plus } from '@element-plus/icons-vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '../../stores/auth'
@@ -131,10 +131,53 @@ const openEdit = (venue) => {
     currentId.value = venue.id
     form.value = { ...venue }
     photoFileList.value = (venue.photos || []).map((url, idx) => ({
+        uid: `server-${venue.id}-${idx}`,
         name: `photo-${idx}`,
-        url: url
+        url: url,
+        status: 'success',
     }))
     showModal.value = true
+}
+
+const MAX_PHOTO_SIZE_MB = 5
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|heic|heif|tiff?)$/i
+
+const isLikelyImageFile = (file) => {
+    const mime = String(file?.type || '').toLowerCase()
+    const name = String(file?.name || '')
+    if (mime.startsWith('image/')) return true
+    return IMAGE_EXT_RE.test(name)
+}
+
+const validatePhotoFile = (file, showMessage = true) => {
+    if (!file) {
+        if (showMessage) ElMessage.error('未检测到可上传文件')
+        return false
+    }
+
+    if (!isLikelyImageFile(file)) {
+        if (showMessage) ElMessage.error('仅支持图片文件（JPG/PNG/WEBP/HEIC 等）')
+        return false
+    }
+
+    const size = Number(file.size || 0)
+    if (size <= 0) {
+        if (showMessage) {
+            ElMessage.warning('照片仍在从 iCloud 下载，请等待下载完成后重试')
+        }
+        return false
+    }
+
+    if (size > MAX_PHOTO_SIZE_MB * 1024 * 1024) {
+        if (showMessage) ElMessage.error(`图片大小不能超过 ${MAX_PHOTO_SIZE_MB}MB`)
+        return false
+    }
+
+    return true
+}
+
+const beforePhotoUpload = (file) => {
+    return validatePhotoFile(file, true)
 }
 
 const submitForm = async () => {
@@ -142,6 +185,17 @@ const submitForm = async () => {
         const capacity = Number(form.value.capacity)
         if (!Number.isFinite(capacity) || capacity < 1) {
             ElMessage.warning('容纳人数需为大于 0 的整数')
+            return
+        }
+
+        const rawNewEntries = photoFileList.value.filter((f) => f.raw)
+        const hasPendingICloudFile = rawNewEntries.some((f) => Number(f.raw?.size || 0) <= 0)
+        if (hasPendingICloudFile) {
+            ElMessage.warning('检测到 iCloud 照片仍未下载完成，请等待后再保存')
+            return
+        }
+        const newFiles = rawNewEntries.filter((f) => validatePhotoFile(f.raw, true))
+        if (newFiles.length !== rawNewEntries.length) {
             return
         }
 
@@ -160,14 +214,20 @@ const submitForm = async () => {
         }
 
         // Upload new photo files (those with raw File objects)
-        const newFiles = photoFileList.value.filter(f => f.raw)
+        let hasPhotoUploadIssue = false
         if (newFiles.length > 0 && venueId) {
             const formData = new FormData()
             newFiles.forEach(f => formData.append('photos', f.raw))
-            await api.post(`/venues/${venueId}/photos`, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-                timeout: 30000
-            })
+            try {
+                await api.post(`/venues/${venueId}/photos`, formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' },
+                    timeout: 30000,
+                })
+            } catch (uploadError) {
+                hasPhotoUploadIssue = true
+                console.error(uploadError)
+                ElMessage.warning('场馆信息已保存，但部分照片上传失败，请稍后重试')
+            }
         }
 
         // Delete removed photos (those that existed on server but are no longer in the list)
@@ -176,11 +236,15 @@ const submitForm = async () => {
             const currentUrls = photoFileList.value.filter(f => !f.raw).map(f => f.url)
             const removedUrls = existingUrls.filter(url => !currentUrls.includes(url))
             for (const url of removedUrls) {
-                await api.delete(`/venues/${venueId}/photos`, { data: { url } }).catch(() => {})
+                await api.delete(`/venues/${venueId}/photos`, { data: { url } }).catch(() => {
+                    hasPhotoUploadIssue = true
+                })
             }
         }
 
-        ElMessage.success(isEdit.value ? "场馆信息更新成功" : "场馆创建成功")
+        if (!hasPhotoUploadIssue) {
+            ElMessage.success(isEdit.value ? "场馆信息更新成功" : "场馆创建成功")
+        }
         showModal.value = false
         fetchVenues()
     } catch (e) {
@@ -626,6 +690,7 @@ const openBuildingDetail = (buildingName) => {
                   :auto-upload="false"
                   accept="image/*"
                   :limit="10"
+                  :before-upload="beforePhotoUpload"
                   :on-preview="(file) => { previewUrl = file.url; previewVisible = true }"
                   :on-exceed="() => ElMessage.warning('最多上传 10 张照片')"
                 >

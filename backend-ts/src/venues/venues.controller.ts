@@ -1,7 +1,8 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpException, HttpStatus, UseInterceptors, UploadedFiles } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { mkdirSync } from 'fs';
+import { extname, resolve } from 'path';
 import { VenuesService } from './venues.service';
 import { CreateVenueDto } from './dto/create-venue.dto';
 import { UpdateVenueDto } from './dto/update-venue.dto';
@@ -13,7 +14,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../common/enums';
-import { IntentResult, LlmService } from '../llm/llm.service';
+import { IntentResult, LlmService, VenueSearchInsight } from '../llm/llm.service';
 import { parseVenueLocation } from './utils/location-utils';
 
 @Controller('venues')
@@ -164,7 +165,11 @@ export class VenuesController {
     @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
     @UseInterceptors(FilesInterceptor('photos', 10, {
         storage: diskStorage({
-            destination: './uploads/venues',
+            destination: (_req, _file, cb) => {
+                const uploadDir = resolve(__dirname, '..', '..', 'uploads', 'venues');
+                mkdirSync(uploadDir, { recursive: true });
+                cb(null, uploadDir);
+            },
             filename: (_req, file, cb) => {
                 const rand = Array(24).fill(null).map(() => Math.round(Math.random() * 16).toString(16)).join('');
                 cb(null, `${rand}${extname(file.originalname)}`);
@@ -289,7 +294,6 @@ export class VenuesController {
         }
 
         const intent = await this.llmService.parseIntent(q);
-        console.log(`AI Search Intent: ${JSON.stringify(intent)}`);
 
         const { startDate, endDate, defaults } = this.resolveSearchWindow(intent);
         const capacity = Math.max(1, Number((intent as any)?.attendees_count || intent.capacity || 1));
@@ -314,20 +318,31 @@ export class VenuesController {
             score: item.score,
         }));
 
-        const insight = await this.llmService.explainVenueSearch({
-            query: q,
-            intent,
-            resultCount: mapped.length,
-            defaultAssumptions: defaults,
-            topResults: mapped.slice(0, 5).map((item) => ({
-                name: item.name,
-                location: item.location,
-                capacity: item.capacity,
-                type: item.type,
-                score: item.score,
-                match_details: item.match_details || [],
-            })),
-        });
+        const fallbackInsight = this.buildFallbackInsight(intent, mapped.length, defaults);
+        let insight = fallbackInsight;
+        try {
+            insight = await Promise.race([
+                this.llmService.explainVenueSearch({
+                    query: q,
+                    intent,
+                    resultCount: mapped.length,
+                    defaultAssumptions: defaults,
+                    topResults: mapped.slice(0, 5).map((item) => ({
+                        name: item.name,
+                        location: item.location,
+                        capacity: item.capacity,
+                        type: item.type,
+                        score: item.score,
+                        match_details: item.match_details || [],
+                    })),
+                }),
+                new Promise<VenueSearchInsight>((resolve) => {
+                    setTimeout(() => resolve(fallbackInsight), 1200);
+                }),
+            ]);
+        } catch {
+            insight = fallbackInsight;
+        }
 
         return {
             query: q,
@@ -390,6 +405,32 @@ export class VenuesController {
                 .filter(Boolean);
         }
         return [];
+    }
+
+    private buildFallbackInsight(intent: IntentResult, resultCount: number, defaults: string[]): VenueSearchInsight {
+        const criteria: string[] = [];
+        const capacity = Number((intent as any)?.attendees_count || intent?.capacity || 0);
+        if (intent?.building) criteria.push(`楼栋:${intent.building}`);
+        if (capacity > 0) criteria.push(`人数≥${capacity}`);
+        if (intent?.type) criteria.push(`类型:${intent.type}`);
+        if (Array.isArray(intent?.facilities)) {
+            intent.facilities.slice(0, 3).forEach((item) => criteria.push(`设备:${item}`));
+        }
+        if (intent?.date) criteria.push(`日期:${intent.date}`);
+        if (Array.isArray(intent?.time_range) && intent.time_range.length === 2) {
+            criteria.push(`时段:${intent.time_range[0]}-${intent.time_range[1]}`);
+        }
+        defaults.slice(0, 2).forEach((item) => criteria.push(`默认:${item}`));
+
+        return {
+            summary: resultCount > 0
+                ? `已结合你的条件筛选，找到 ${resultCount} 个候选场馆。`
+                : '当前条件下暂无可用场馆，可尝试放宽条件。',
+            criteria: criteria.slice(0, 8),
+            tips: resultCount === 0
+                ? ['放宽人数或设备要求', '尝试更换时间段', '可去掉楼栋限制再试']
+                : (resultCount < 3 ? ['可放宽设备要求提高命中'] : []),
+        };
     }
 
     private toResponseDto(venue: any): VenueResponseDto {

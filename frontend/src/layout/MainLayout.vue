@@ -7,14 +7,16 @@ import { ElMessage } from 'element-plus'
 import { formatTime } from '../utils/formatters'
 import { hasGlobalNoticePopupShown, markGlobalNoticePopupShown } from '../utils/client-flags'
 import {
-  Menu as IconMenu,
   Setting,
   User,
   UserFilled,
-  House,
+  DataAnalysis,
+  Monitor,
+  Collection,
+  ChatSquare,
+  Clock,
   CircleCheck,
   Bell,
-  Operation,
   ArrowDown,
   Search
 } from '@element-plus/icons-vue'
@@ -28,7 +30,6 @@ const authStore = useAuthStore()
 const activeMenu = computed(() => route.path)
 const userRole = computed(() => authStore.user?.role)
 const isAdminUser = computed(() => ['sys_admin', 'venue_admin', 'floor_admin'].includes(userRole.value))
-const showLlmStatusIsland = computed(() => true)
 const hasManagedScope = computed(() => {
     const building = (authStore.user?.managed_building || '').trim()
     const floor = (authStore.user?.managed_floor || '').trim()
@@ -59,6 +60,9 @@ const mainContentRef = ref(null)
 const isMainContentScrolling = ref(false)
 let mainScrollIdleTimer = null
 let mainScrollRafId = null
+let sessionHeartbeatTimer = null
+let sessionHeartbeatLock = false
+const SESSION_HEARTBEAT_MS = 10000
 
 const getMainContentEl = () => {
     const target = mainContentRef.value
@@ -166,6 +170,39 @@ const fetchUnreadCount = async () => {
     }
 }
 
+const verifySessionHeartbeat = async () => {
+    if (!authStore.token || sessionHeartbeatLock) return
+    if (document.visibilityState === 'hidden') return
+    sessionHeartbeatLock = true
+    try {
+        const res = await api.get('/users/me', { silentAuth: true })
+        if (res?.data?.id && Number(authStore.user?.id) !== Number(res.data.id)) {
+            authStore.setUser(res.data)
+        }
+    } catch {
+        // 401 is handled centrally in axios interceptor.
+    } finally {
+        sessionHeartbeatLock = false
+    }
+}
+
+const startSessionHeartbeat = () => {
+    stopSessionHeartbeat()
+    verifySessionHeartbeat()
+    sessionHeartbeatTimer = setInterval(verifySessionHeartbeat, SESSION_HEARTBEAT_MS)
+    window.addEventListener('focus', verifySessionHeartbeat)
+    document.addEventListener('visibilitychange', verifySessionHeartbeat)
+}
+
+const stopSessionHeartbeat = () => {
+    if (sessionHeartbeatTimer) {
+        clearInterval(sessionHeartbeatTimer)
+        sessionHeartbeatTimer = null
+    }
+    window.removeEventListener('focus', verifySessionHeartbeat)
+    document.removeEventListener('visibilitychange', verifySessionHeartbeat)
+}
+
 const fetchNotifications = async () => {
     try {
         const res = await api.get('/notifications/')
@@ -211,11 +248,6 @@ onMounted(() => {
         showChangePwd.value = true
     }
 
-    // Check LLM status only when smart search is relevant
-    if (showLlmStatusIsland.value) {
-        checkLlmStatus()
-    }
-
     // Load latest announcement
     fetchLatestAnnouncement()
     
@@ -232,14 +264,13 @@ onMounted(() => {
     nextTick(() => {
         bindMainContentScroll()
     })
+
+    startSessionHeartbeat()
 })
 
 watch(
     () => route.path,
     () => {
-        if (showLlmStatusIsland.value) {
-            checkLlmStatus()
-        }
         if (!isBottomRail.value) {
             isAsideExpanded.value = false
         }
@@ -263,19 +294,8 @@ onUnmounted(() => {
     unbindMainContentScroll()
     window.removeEventListener('resize', handleViewportResize)
     window.removeEventListener('orientationchange', handleViewportResize)
+    stopSessionHeartbeat()
 })
-
-const llmStatus = ref('loading') // 'connected', 'error', 'loading'
-
-const checkLlmStatus = async () => {
-    try {
-        await api.post('/nlp/parse', { query: '状态检测' })
-        llmStatus.value = 'connected'
-    } catch (e) {
-        console.error('LLM status check failed', e)
-        llmStatus.value = 'error'
-    }
-}
 
 const pageTitle = computed(() => {
     const p = route.path
@@ -396,12 +416,12 @@ const handleLogout = () => {
           <!-- Student Menu -->
           <template v-if="userRole === 'student_teacher'">
             <el-menu-item index="/student/overview">
-              <el-icon><House /></el-icon>
+              <el-icon><DataAnalysis /></el-icon>
               <span>总览</span>
             </el-menu-item>
 
             <el-menu-item index="/student/venues">
-              <el-icon><Operation /></el-icon>
+              <el-icon><Collection /></el-icon>
               <span>场馆</span>
             </el-menu-item>
 
@@ -411,7 +431,7 @@ const handleLogout = () => {
             </el-menu-item>
             
             <el-menu-item index="/student/reservations">
-              <el-icon><CircleCheck /></el-icon>
+              <el-icon><Clock /></el-icon>
               <span>预约</span>
             </el-menu-item>
           </template>
@@ -419,12 +439,12 @@ const handleLogout = () => {
           <!-- Admin Menu -->
           <template v-if="['venue_admin', 'floor_admin', 'sys_admin'].includes(userRole)">
              <el-menu-item index="/admin/dashboard">
-              <el-icon><House /></el-icon>
+              <el-icon><Monitor /></el-icon>
               <span>概览</span>
             </el-menu-item>
 
              <el-menu-item v-if="canAccessVenueTab" index="/admin/venues">
-              <el-icon><Operation /></el-icon>
+              <el-icon><Collection /></el-icon>
               <span>场馆</span>
             </el-menu-item>
 
@@ -439,7 +459,7 @@ const handleLogout = () => {
             </el-menu-item>
 
             <el-menu-item index="/admin/announcements" v-if="userRole === 'sys_admin'">
-                <el-icon><IconMenu /></el-icon>
+                <el-icon><ChatSquare /></el-icon>
                 <span>公告</span>
             </el-menu-item>
 
@@ -458,16 +478,6 @@ const handleLogout = () => {
             <div class="header-left glass-pill">
               <span class="page-title">{{ pageTitle }}</span>
             </div>
-          </div>
-
-          <!-- Center Island: System Status -->
-          <div
-            v-if="showLlmStatusIsland"
-            class="status-island glass-pill"
-            :title="llmStatus === 'connected' ? 'LLM 可用' : 'LLM 不可用'"
-          >
-              <div class="status-dot" :class="llmStatus"></div>
-              <span class="status-text">{{ llmStatus === 'connected' ? 'LLM 在线' : 'LLM 离线' }}</span>
           </div>
 
           <!-- Right Island: User Profile + Compact Menu -->
@@ -538,7 +548,7 @@ const handleLogout = () => {
         <el-main ref="mainContentRef" class="main-content">
           <div class="content-shell">
             <router-view v-slot="{ Component }">
-               <transition name="fade" mode="out-in">
+               <transition name="page-refresh" mode="out-in">
                  <component :is="Component" />
                </transition>
             </router-view>
@@ -731,57 +741,59 @@ html.dark .aside-menu.aside-menu--expanded {
 
 /* Bottom rail mode: phone portrait + pc portrait narrow */
 .aside-menu.aside-menu--bottom {
-    bottom: 14px;
+    bottom: 12px;
     top: auto;
     left: 50% !important;
     right: auto !important;
     margin: 0 !important;
     transform: translateX(-50%) !important;
     flex-direction: row;
-    width: min(clamp(240px, 58vw, 620px), calc(100% - 24px)) !important;
-    height: clamp(58px, 7.6vh, 68px);
-    min-height: clamp(58px, 7.6vh, 68px);
-    border-radius: 30px;
-    padding: 7px !important;
+    width: min(660px, calc(100% - 16px)) !important;
+    height: clamp(60px, 7.6vh, 70px);
+    min-height: clamp(60px, 7.6vh, 70px);
+    border-radius: 26px;
+    padding: 6px !important;
+    border: 1px solid rgba(255, 255, 255, 0.64) !important;
     box-shadow:
-        0 12px 34px rgba(0, 0, 0, 0.16),
-        inset 0 1px 0 rgba(255, 255, 255, 0.52);
+        0 8px 20px rgba(0, 0, 0, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.58);
     background: linear-gradient(
-        150deg,
-        rgba(245, 247, 252, 0.54) 0%,
-        rgba(235, 238, 247, 0.46) 100%
+        140deg,
+        rgba(249, 251, 255, 0.72) 0%,
+        rgba(235, 240, 251, 0.62) 52%,
+        rgba(225, 232, 247, 0.58) 100%
     ) !important;
-    backdrop-filter: blur(24px) saturate(145%);
-    -webkit-backdrop-filter: blur(24px) saturate(145%);
+    backdrop-filter: blur(24px) saturate(158%);
+    -webkit-backdrop-filter: blur(24px) saturate(158%);
     transition: transform 0.22s ease, box-shadow 0.22s ease, background 0.22s ease, border-color 0.22s ease;
     will-change: transform;
-    z-index: 2200;
+    z-index: 1000;
     overflow: hidden;
 }
 
-.aside-menu.aside-menu--bottom.aside-menu--compact {
-    width: min(clamp(168px, 34vw, 320px), calc(100% - 130px)) !important;
+.aside-menu.aside-menu--bottom::before {
+    display: none;
 }
 
 .aside-menu.aside-menu--bottom:hover,
 .aside-menu.aside-menu--bottom.aside-menu--expanded {
-    width: min(clamp(240px, 58vw, 620px), calc(100% - 24px)) !important;
-    height: clamp(58px, 7.6vh, 68px);
-    min-height: clamp(58px, 7.6vh, 68px);
+    width: min(660px, calc(100% - 16px)) !important;
+    height: clamp(60px, 7.6vh, 70px);
+    min-height: clamp(60px, 7.6vh, 70px);
     align-items: center !important;
     transform: translateX(-50%) !important;
 }
 
 html.dark .aside-menu.aside-menu--bottom {
     background: linear-gradient(
-        150deg,
-        rgba(35, 37, 43, 0.6) 0%,
-        rgba(29, 31, 36, 0.56) 100%
+        145deg,
+        rgba(35, 38, 46, 0.78) 0%,
+        rgba(24, 27, 34, 0.74) 100%
     ) !important;
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
     box-shadow:
-        0 12px 34px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        0 12px 34px rgba(0, 0, 0, 0.52),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 html.dark .aside-menu.aside-menu--bottom:hover,
@@ -802,8 +814,10 @@ html.dark .aside-menu.aside-menu--bottom.aside-menu--expanded {
     width: 100% !important;
     height: 100%;
     align-items: stretch;
-    gap: 8px;
+    gap: 6px;
     padding: 0;
+    position: relative;
+    z-index: 1;
 }
 
 .aside-menu.aside-menu--bottom :deep(.el-menu-item) {
@@ -812,61 +826,78 @@ html.dark .aside-menu.aside-menu--bottom.aside-menu--expanded {
     min-width: 0 !important;
     height: 100% !important;
     margin: 0 !important;
-    border-radius: 20px !important;
+    border-radius: 18px !important;
     padding: 0 8px !important;
     display: flex;
     flex-direction: column !important;
     justify-content: center;
     align-items: center;
-    gap: 2px;
-    transition: background 0.2s ease, box-shadow 0.2s ease;
+    gap: 3px;
+    color: rgba(20, 22, 30, 0.82);
+    transition: background 0.22s ease, box-shadow 0.22s ease, color 0.22s ease, transform 0.22s ease;
 }
 
 .aside-menu.aside-menu--bottom :deep(.el-menu-item .el-icon) {
     position: static;
     transform: none;
     min-width: auto;
-    font-size: 17px;
+    font-size: 18px;
     line-height: 1;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .aside-menu.aside-menu--bottom :deep(.el-menu-item span) {
     opacity: 1;
     width: auto;
-    max-height: 20px;
-    transform: translateY(1px);
-    font-size: 10.5px;
-    font-weight: 600;
+    max-height: 18px;
+    transform: translateY(0);
+    font-size: 11px;
+    font-weight: 700;
     line-height: 1.1;
-    letter-spacing: 0.15px;
+    letter-spacing: 0.2px;
     margin: 0;
     white-space: nowrap;
     transition: opacity 0.2s ease;
 }
 
 .aside-menu.aside-menu--bottom :deep(.el-menu-item:hover) {
-    transform: none;
-    background-color: rgba(255, 255, 255, 0.18) !important;
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.34) !important;
+    color: #0e213f;
 }
 
 .aside-menu.aside-menu--bottom :deep(.el-menu-item.is-active) {
-    background: rgba(255, 255, 255, 0.94) !important;
+    background: linear-gradient(
+        150deg,
+        rgba(255, 255, 255, 0.98) 0%,
+        rgba(236, 245, 255, 0.96) 100%
+    ) !important;
     color: #111 !important;
-    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
-    transform: none;
+    box-shadow: 0 6px 14px rgba(32, 90, 184, 0.14);
+    transform: translateY(-1px);
 }
 
 html.dark .aside-menu.aside-menu--bottom :deep(.el-menu-item) {
-    color: #f0f0f0;
+    color: #f0f3fa;
 }
 
 html.dark .aside-menu.aside-menu--bottom :deep(.el-menu-item:hover) {
-    background-color: rgba(255, 255, 255, 0.12) !important;
+    background-color: rgba(255, 255, 255, 0.14) !important;
 }
 
 html.dark .aside-menu.aside-menu--bottom :deep(.el-menu-item.is-active) {
-    background: rgba(255, 255, 255, 0.9) !important;
+    background: linear-gradient(
+        140deg,
+        rgba(255, 255, 255, 0.94) 0%,
+        rgba(224, 236, 255, 0.9) 100%
+    ) !important;
     color: #111 !important;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.32);
 }
 
 .aside-menu.aside-menu--bottom + .el-container .main-content {
@@ -890,44 +921,6 @@ html.dark .aside-menu.aside-menu--bottom :deep(.el-menu-item.is-active) {
     display: flex;
     flex-direction: column;
     align-items: center; /* Center menu items initially */
-}
-
-/* Status Island Style - Align with .glass-pill */
-.status-island {
-    position: fixed;
-    top: 32px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 910;
-    gap: 8px;
-}
-
-.status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #ccc;
-    transition: background-color 0.4s ease, box-shadow 0.4s ease;
-    box-shadow: 0 0 10px rgba(0,0,0,0.1);
-}
-
-.status-text {
-    font-size: 13px;
-    font-weight: 600;
-    color: #1d1d1f;
-    opacity: 0.8;
-}
-
-html.dark .status-text { color: #eee; }
-
-.status-dot.connected {
-    background: #67c23a; /* Green */
-    box-shadow: 0 0 10px #67c23a;
-}
-
-.status-dot.error {
-    background: #f56c6c; /* Red */
-    box-shadow: 0 0 8px #f56c6c;
 }
 
 .aside-menu:hover .el-menu-vertical {
@@ -1582,21 +1575,25 @@ html.dark :deep(.el-menu-item.is-active) {
 }
 
 /* Animations */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.2, 0, 0, 1);
+.page-refresh-enter-active,
+.page-refresh-leave-active {
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, opacity;
 }
 
-.fade-enter-from,
-.fade-leave-to {
+.page-refresh-enter-from {
   opacity: 0;
-  transform: scale(0.98);
+  transform: translateY(-12px) scale(0.995);
+}
+
+.page-refresh-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.997);
 }
 
 /* --- RESPONSIVE BREAKPOINTS (ALL DEVICES) --- */
 @media (max-width: 1360px) {
     .header-left-group { top: 24px; }
-    .status-island { top: 24px; }
     .header-right-container { top: 24px; right: 24px; }
     .main-content { padding: 88px 20px 24px var(--rail-offset-left); }
     .content-shell { min-height: calc(100dvh - 112px); padding: 16px 8px 2px; }
@@ -1635,11 +1632,6 @@ html.dark :deep(.el-menu-item.is-active) {
         border-radius: 34px;
         padding: 8px !important;
         transform: translateX(-50%) !important;
-    }
-
-    .aside-menu.aside-menu--bottom.aside-menu--compact {
-        width: calc(100vw - 12px) !important;
-        max-width: calc(100vw - 12px) !important;
     }
 
     .aside-menu.aside-menu--bottom:hover,
@@ -1742,34 +1734,6 @@ html.dark :deep(.el-menu-item.is-active) {
         width: min(300px, calc(100vw - 20px));
     }
 
-    .status-island {
-        display: flex !important;
-        top: 17px !important;
-        padding: 4px 9px !important;
-        min-width: 0 !important;
-        background: rgba(255, 255, 255, 0.52) !important;
-        backdrop-filter: blur(16px) saturate(145%) !important;
-        -webkit-backdrop-filter: blur(16px) saturate(145%) !important;
-        border: 1px solid rgba(255, 255, 255, 0.72) !important;
-        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.11) !important;
-        gap: 0 !important;
-    }
-
-    html.dark .status-island {
-        background: rgba(18, 21, 29, 0.72) !important;
-        border: 1px solid rgba(255, 255, 255, 0.2) !important;
-        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38) !important;
-    }
-
-    .status-island .status-text {
-        display: none !important;
-    }
-
-    .status-island .status-dot {
-        width: 9px !important;
-        height: 9px !important;
-    }
-
 }
 
 @media (max-width: 768px) and (orientation: portrait) {
@@ -1807,10 +1771,6 @@ html.dark :deep(.el-menu-item.is-active) {
         height: clamp(46px, 11.5vh, 58px);
         min-height: clamp(46px, 11.5vh, 58px);
         transform: translateX(-50%) !important;
-    }
-
-    .aside-menu.aside-menu--bottom.aside-menu--compact {
-        width: min(clamp(146px, 40vw, 260px), calc(100% - 126px)) !important;
     }
 
     .aside-menu.aside-menu--bottom :deep(.el-menu-item .el-icon) {
@@ -1861,7 +1821,6 @@ html.dark :deep(.el-menu-item.is-active) {
 .common-layout.is-resizing .aside-menu,
 .common-layout.is-resizing .header-left,
 .common-layout.is-resizing .header-right,
-.common-layout.is-resizing .status-island,
 .common-layout.is-resizing .content-shell {
     transition: none !important;
 }
@@ -1890,7 +1849,7 @@ html.dark :deep(.el-menu-item.is-active) {
     width: auto !important;
     justify-content: center !important;
     padding: 0 8px !important;
-    transform: none !important;
+    transform: translateY(-1px) !important;
 }
 
 .aside-menu.aside-menu--bottom:hover :deep(.el-menu-item span),
@@ -1898,7 +1857,7 @@ html.dark :deep(.el-menu-item.is-active) {
     opacity: 1 !important;
     width: auto !important;
     margin-left: 0 !important;
-    transform: translateY(1px) !important;
+    transform: translateY(0) !important;
 }
 
 @media (hover: none), (pointer: coarse) {

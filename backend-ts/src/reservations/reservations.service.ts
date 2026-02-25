@@ -54,6 +54,11 @@ const MAX_RECURRING_OCCURRENCES = 120;
 
 @Injectable()
 export class ReservationsService {
+    private readonly MAX_AUDIT_CONCURRENCY = 2;
+    private runningAuditTasks = 0;
+    private readonly auditQueue: number[] = [];
+    private readonly pendingAuditIds = new Set<number>();
+
     constructor(
         @InjectRepository(Reservation)
         private reservationRepository: Repository<Reservation>,
@@ -106,7 +111,7 @@ export class ReservationsService {
 
     async create(createReservationDto: CreateReservationDto, userId: number, proposalUrl?: string): Promise<Reservation> {
         const savedReservation = await this.createPendingReservation(createReservationDto, userId, proposalUrl);
-        this.auditReservation(savedReservation.id, savedReservation.proposalContent);
+        this.enqueueAuditReservation(savedReservation.id);
         return savedReservation;
     }
 
@@ -131,7 +136,7 @@ export class ReservationsService {
                     created.push(row);
                 }
                 await queryRunner.commitTransaction();
-                created.forEach((row) => this.auditReservation(row.id, row.proposalContent));
+                created.forEach((row) => this.enqueueAuditReservation(row.id));
                 return {
                     all_or_nothing: true,
                     total: items.length,
@@ -155,7 +160,7 @@ export class ReservationsService {
             try {
                 const row = await this.createPendingReservation(items[i], userId);
                 createdIds.push(row.id);
-                this.auditReservation(row.id, row.proposalContent);
+                this.enqueueAuditReservation(row.id);
             } catch (error) {
                 failedItems.push({
                     index: i,
@@ -184,7 +189,7 @@ export class ReservationsService {
             try {
                 const row = await this.createPendingReservation(occurrence, userId);
                 createdIds.push(row.id);
-                this.auditReservation(row.id, row.proposalContent);
+                this.enqueueAuditReservation(row.id);
             } catch (error) {
                 failedItems.push({
                     start_time: occurrence.start_time,
@@ -585,17 +590,89 @@ export class ReservationsService {
         };
     }
 
-    // AI Audit Logic
-    private async auditReservation(reservationId: number, content: string) {
-        try {
-            const auditResult = await this.llmService.auditProposal(content);
-
-            await this.reservationRepository.update(reservationId, {
-                aiRiskScore: auditResult.score,
-                aiAuditComment: auditResult.reason,
-            });
-        } catch (error) {
-            console.error(`Failed to audit reservation ${reservationId}:`, error);
+    private enqueueAuditReservation(reservationId: number) {
+        if (!Number.isFinite(reservationId) || reservationId <= 0) {
+            return;
         }
+        if (this.pendingAuditIds.has(reservationId)) {
+            return;
+        }
+        this.pendingAuditIds.add(reservationId);
+        this.auditQueue.push(reservationId);
+        this.drainAuditQueue();
+    }
+
+    private drainAuditQueue() {
+        while (this.runningAuditTasks < this.MAX_AUDIT_CONCURRENCY && this.auditQueue.length > 0) {
+            const reservationId = this.auditQueue.shift();
+            if (!reservationId) {
+                continue;
+            }
+            this.runningAuditTasks += 1;
+            this.runAuditTask(reservationId)
+                .catch((error) => {
+                    console.error(`Failed to audit reservation ${reservationId}:`, error);
+                })
+                .finally(() => {
+                    this.runningAuditTasks = Math.max(0, this.runningAuditTasks - 1);
+                    this.pendingAuditIds.delete(reservationId);
+                    this.drainAuditQueue();
+                });
+        }
+    }
+
+    private truncateAuditText(value: string, maxLen: number): string {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        if (text.length <= maxLen) return text;
+        return `${text.slice(0, maxLen)}…(已截断)`;
+    }
+
+    private buildAuditInput(reservation: Reservation): string {
+        const venue = reservation.venue;
+        const user = reservation.user;
+        const lines = [
+            `预约编号: ${reservation.id}`,
+            `申请人账号: ${user?.username || reservation.organizer || '未知'}`,
+            `活动名称: ${reservation.activityName || '未填写'}`,
+            `主办单位: ${reservation.organizerUnit || '未填写'}`,
+            `负责人: ${reservation.contactName || '未填写'}`,
+            `联系电话: ${reservation.contactPhone || '未填写'}`,
+            `预计人数: ${reservation.attendeesCount || 0}`,
+            `开始时间: ${reservation.startTime ? reservation.startTime.toISOString() : '未填写'}`,
+            `结束时间: ${reservation.endTime ? reservation.endTime.toISOString() : '未填写'}`,
+            `场地名称: ${venue?.name || '未知'}`,
+            `场地类型: ${venue?.type || '未知'}`,
+            `场地容量: ${Number.isFinite(Number(venue?.capacity)) ? Number(venue?.capacity) : '未知'}`,
+            `场地位置: ${venue?.location || '未知'}`,
+            `场地设施: ${Array.isArray(venue?.facilities) && venue.facilities.length > 0 ? venue.facilities.join('、') : '未填写'}`,
+            `活动简述: ${this.truncateAuditText(reservation.activityDescription || '', 1200) || '未填写'}`,
+            `活动提案: ${this.truncateAuditText(reservation.proposalContent || '', 3000) || '未填写'}`,
+        ];
+
+        if (reservation.proposalUrl) {
+            lines.push(`附件地址: ${reservation.proposalUrl}`);
+        }
+
+        return lines.join('\n');
+    }
+
+    private async runAuditTask(reservationId: number) {
+        const reservation = await this.reservationRepository.findOne({
+            where: { id: reservationId },
+            relations: ['venue', 'user'],
+        });
+
+        if (!reservation) {
+            return;
+        }
+
+        const auditInput = this.buildAuditInput(reservation);
+        const auditResult = await this.llmService.auditProposal(auditInput);
+
+        await this.reservationRepository.update(reservationId, {
+            aiRiskScore: auditResult.score,
+            aiAuditComment: auditResult.reason,
+        });
     }
 }

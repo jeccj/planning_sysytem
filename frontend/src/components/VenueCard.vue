@@ -255,26 +255,29 @@ defineEmits(['book', 'view-detail'])
 @media (max-width: 768px) {
     .card-content-row {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: minmax(0, 1fr) auto;
         grid-template-areas: 
             "title action"
             "info info";
-        gap: 12px;
+        gap: 10px;
         padding: 16px;
         align-items: center;
+        overflow: visible;
     }
     
     .title-section {
         grid-area: title;
-        width: 100%;
+        width: auto;
+        min-width: 0;
         margin: 0;
     }
     
     .action-section {
         grid-area: action;
         /* Position relative to grid, no absolute */
-        position: static; 
+        position: static;
         width: auto;
+        min-width: max-content;
         display: flex;
         justify-content: flex-end;
     }
@@ -282,11 +285,23 @@ defineEmits(['book', 'view-detail'])
     .info-section {
         grid-area: info;
         width: 100%;
+        min-width: 0;
         display: flex;
         flex-wrap: wrap; /* Wrap pills if narrow */
         gap: 8px;
         justify-content: flex-start;
         margin-top: 4px;
+    }
+
+    .action-buttons {
+        gap: 8px;
+    }
+
+    .action-btn-circle {
+        width: 40px;
+        height: 40px;
+        flex: 0 0 40px;
+        font-size: 16px;
     }
     
     .d-none-mobile { display: none; }

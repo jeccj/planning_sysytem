@@ -1,7 +1,8 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpException, HttpStatus, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { mkdirSync } from 'fs';
+import { extname, resolve } from 'path';
 import { ReservationsService } from './reservations.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { UpdateReservationDto } from './dto/update-reservation.dto';
@@ -27,17 +28,18 @@ export class ReservationsController {
         @Query('limit') limit: string = '100',
         @Query('status') status?: string,
     ): Promise<ReservationResponseDto[]> {
-        const filter: Record<string, any> = user.role === UserRole.VENUE_ADMIN
-            ? {
-                buildingName: (user.managedBuilding || '').trim() || (((user.managedFloor || '').trim()) ? undefined : '__NO_SCOPE__'),
-                floorLabel: (user.managedFloor || '').trim() || undefined,
-            }
-            : (user.role === UserRole.FLOOR_ADMIN
-                ? {
-                    buildingName: (user.managedBuilding || '').trim() || (((user.managedFloor || '').trim()) ? undefined : '__NO_SCOPE__'),
-                    floorLabel: (user.managedFloor || '').trim() || undefined,
-                }
-                : (user.role === UserRole.STUDENT_TEACHER ? { userId: user.id } : {}));
+        const filter: Record<string, any> = {};
+        const managedBuilding = (user.managedBuilding || '').trim();
+        const managedFloor = (user.managedFloor || '').trim();
+
+        if (user.role === UserRole.VENUE_ADMIN || user.role === UserRole.FLOOR_ADMIN) {
+            filter.buildingName = managedBuilding || (managedFloor ? undefined : '__NO_SCOPE__');
+            filter.floorLabel = managedFloor || undefined;
+        } else if (user.role !== UserRole.SYS_ADMIN) {
+            // Non-admin roles must only see their own reservations.
+            filter.userId = user.id;
+        }
+
         // Add status filter if provided
         if (status && Object.values(ReservationStatus).includes(status as ReservationStatus)) {
             filter.status = status as ReservationStatus;
@@ -68,7 +70,11 @@ export class ReservationsController {
     @UseGuards(JwtAuthGuard)
     @UseInterceptors(FileInterceptor('file', {
         storage: diskStorage({
-            destination: './uploads',
+            destination: (_req, _file, cb) => {
+                const uploadDir = resolve(__dirname, '..', '..', 'uploads');
+                mkdirSync(uploadDir, { recursive: true });
+                cb(null, uploadDir);
+            },
             filename: (req, file, cb) => {
                 const randomName = Array(32).fill(null).map(() => (Math.round(Math.random() * 16)).toString(16)).join('');
                 cb(null, `${randomName}${extname(file.originalname)}`);

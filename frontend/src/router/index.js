@@ -1,9 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import Login from '../views/Login.vue'
-import MainLayout from '../layout/MainLayout.vue'
 
 // Lazy load views
+const Login = () => import('../views/Login.vue')
+const MainLayout = () => import('../layout/MainLayout.vue')
 const StudentDashboard = () => import('../views/student/Dashboard.vue')
 const AdminDashboard = () => import('../views/admin/Dashboard.vue')
 const VenueManagement = () => import('../views/admin/VenueManagement.vue')
@@ -13,7 +13,7 @@ const Announcements = () => import('../views/Announcements.vue')
 const SystemSettings = () => import('../views/admin/SystemSettings.vue')
 
 let lastAuthCheckAt = 0
-const AUTH_CHECK_TTL_MS = 20_000
+const AUTH_CHECK_TTL_MS = 60_000
 
 const ensureSessionValid = async (authStore) => {
     if (!authStore.token) return false
