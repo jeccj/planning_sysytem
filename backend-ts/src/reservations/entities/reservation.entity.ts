@@ -1,9 +1,12 @@
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { ReservationStatus } from '../../common/enums';
 import { User } from '../../users/entities/user.entity';
 import { Venue } from '../../venues/entities/venue.entity';
 
 @Entity('reservations')
+@Index('idx_reservations_user_start', ['userId', 'startTime'])
+@Index('idx_reservations_venue_status_start_end', ['venueId', 'status', 'startTime', 'endTime'])
+@Index('idx_reservations_status_start', ['status', 'startTime'])
 export class Reservation {
     @PrimaryGeneratedColumn()
     id: number;

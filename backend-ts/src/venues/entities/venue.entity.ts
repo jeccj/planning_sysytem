@@ -1,9 +1,12 @@
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, OneToMany, JoinColumn, Index } from 'typeorm';
 import { VenueStatus } from '../../common/enums';
 import { User } from '../../users/entities/user.entity';
 import { Reservation } from '../../reservations/entities/reservation.entity';
 
 @Entity('venues')
+@Index('idx_venues_building_floor', ['buildingName', 'floorLabel'])
+@Index('idx_venues_status', ['status'])
+@Index('idx_venues_admin', ['adminId'])
 export class Venue {
     @PrimaryGeneratedColumn()
     id: number;

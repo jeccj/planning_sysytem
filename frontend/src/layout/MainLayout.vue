@@ -62,7 +62,7 @@ let mainScrollIdleTimer = null
 let mainScrollRafId = null
 let sessionHeartbeatTimer = null
 let sessionHeartbeatLock = false
-const SESSION_HEARTBEAT_MS = 10000
+const SESSION_HEARTBEAT_MS = 15000
 
 const getMainContentEl = () => {
     const target = mainContentRef.value
@@ -162,6 +162,9 @@ const handleAsideClick = (event) => {
 }
 
 const fetchUnreadCount = async () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return
+    }
     try {
         const res = await api.get('/notifications/unread-count')
         unreadNotificationCount.value = res.data.count
@@ -201,6 +204,11 @@ const stopSessionHeartbeat = () => {
     }
     window.removeEventListener('focus', verifySessionHeartbeat)
     document.removeEventListener('visibilitychange', verifySessionHeartbeat)
+}
+
+const handleVisibilityRefresh = () => {
+    if (document.visibilityState !== 'visible') return
+    fetchUnreadCount()
 }
 
 const fetchNotifications = async () => {
@@ -260,6 +268,7 @@ onMounted(() => {
     handleViewportResize()
     window.addEventListener('resize', handleViewportResize, { passive: true })
     window.addEventListener('orientationchange', handleViewportResize)
+    document.addEventListener('visibilitychange', handleVisibilityRefresh)
 
     nextTick(() => {
         bindMainContentScroll()
@@ -294,6 +303,7 @@ onUnmounted(() => {
     unbindMainContentScroll()
     window.removeEventListener('resize', handleViewportResize)
     window.removeEventListener('orientationchange', handleViewportResize)
+    document.removeEventListener('visibilitychange', handleVisibilityRefresh)
     stopSessionHeartbeat()
 })
 

@@ -399,19 +399,22 @@ export class ReservationsService {
         end: Date,
         excludeId?: number,
     ): Promise<Reservation | null> {
-        const overlaps = await reservationRepo.find({
-            where: {
-                venueId,
-                status: In([ReservationStatus.APPROVED, ReservationStatus.MAINTENANCE]),
-                startTime: LessThan(end),
-                endTime: MoreThan(start),
-            },
-            take: 20,
-        });
-        if (!excludeId) {
-            return overlaps[0] || null;
+        const qb = reservationRepo
+            .createQueryBuilder('reservation')
+            .where('reservation.venueId = :venueId', { venueId })
+            .andWhere('reservation.status IN (:...statuses)', {
+                statuses: [ReservationStatus.APPROVED, ReservationStatus.MAINTENANCE],
+            })
+            .andWhere('reservation.startTime < :end', { end })
+            .andWhere('reservation.endTime > :start', { start })
+            .orderBy('reservation.startTime', 'ASC')
+            .take(1);
+
+        if (excludeId) {
+            qb.andWhere('reservation.id != :excludeId', { excludeId });
         }
-        return overlaps.find((item) => item.id !== excludeId) || null;
+
+        return qb.getOne();
     }
 
     private static ALLOWED_STATUS_TRANSITIONS: Record<string, ReservationStatus[]> = {

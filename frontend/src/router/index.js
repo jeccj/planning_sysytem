@@ -13,29 +13,52 @@ const Announcements = () => import('../views/Announcements.vue')
 const SystemSettings = () => import('../views/admin/SystemSettings.vue')
 
 let lastAuthCheckAt = 0
-const AUTH_CHECK_TTL_MS = 60_000
+let pendingAuthCheck = null
+const AUTH_CHECK_TTL_MS = 300_000
+const AUTH_CHECK_TIMEOUT_MS = 8_000
 
 const ensureSessionValid = async (authStore) => {
     if (!authStore.token) return false
     if (authStore.user && Date.now() - lastAuthCheckAt < AUTH_CHECK_TTL_MS) {
         return true
     }
-
-    try {
-        const res = await fetch('/api/users/me', {
-            method: 'GET',
-            headers: {
-                Authorization: `Bearer ${authStore.token}`,
-            },
-        })
-        if (!res.ok) return false
-        const user = await res.json()
-        authStore.setUser(user)
-        lastAuthCheckAt = Date.now()
-        return true
-    } catch {
-        return false
+    if (pendingAuthCheck) {
+        return pendingAuthCheck
     }
+
+    pendingAuthCheck = (async () => {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), AUTH_CHECK_TIMEOUT_MS)
+        try {
+            const res = await fetch('/api/users/me', {
+                method: 'GET',
+                headers: {
+                    Authorization: `Bearer ${authStore.token}`,
+                },
+                signal: controller.signal,
+            })
+
+            if (res.status === 401) {
+                return false
+            }
+            if (!res.ok) {
+                return Boolean(authStore.user)
+            }
+
+            const user = await res.json()
+            authStore.setUser(user)
+            lastAuthCheckAt = Date.now()
+            return true
+        } catch {
+            // Transient network failures should not immediately log the user out.
+            return Boolean(authStore.user)
+        } finally {
+            clearTimeout(timeout)
+            pendingAuthCheck = null
+        }
+    })()
+
+    return pendingAuthCheck
 }
 
 const router = createRouter({

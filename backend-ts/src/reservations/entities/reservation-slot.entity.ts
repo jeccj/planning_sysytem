@@ -3,6 +3,7 @@ import { Reservation } from './reservation.entity';
 
 @Entity('reservation_slots')
 @Index(['venueId', 'slotStart'], { unique: true })
+@Index('idx_reservation_slots_reservation_id', ['reservationId'])
 export class ReservationSlot {
     @PrimaryGeneratedColumn()
     id: number;
