@@ -241,7 +241,7 @@ const getRiskParams = (score) => {
                         <p class="section-title">提案内容</p>
                         <p class="proposal-text">{{ item.proposal_content || '暂无提案内容' }}</p>
                         <a v-if="item.proposal_url" :href="getProposalLink(item.proposal_url)" target="_blank" class="proposal-link">
-                            下载策划书
+                            查看策划书
                         </a>
                     </div>
 

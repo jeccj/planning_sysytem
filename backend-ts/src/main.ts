@@ -34,7 +34,9 @@ async function bootstrap() {
   // Serve uploaded files
   const expressApp = app.getHttpAdapter().getInstance();
   const express = require('express');
-  expressApp.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+  const uploadsPath = path.join(__dirname, '..', 'uploads');
+  expressApp.use('/uploads', express.static(uploadsPath));
+  expressApp.use('/api/uploads', express.static(uploadsPath));  // 同时支持 /api/uploads 路径
 
   // Serve built frontend (npm run build in frontend/, output to frontend/dist)
   const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');
