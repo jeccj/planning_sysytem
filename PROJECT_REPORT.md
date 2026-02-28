@@ -877,25 +877,25 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 ### 9.1 各模块截图清单
 
 1. 登录页：
-![[./report-assets/screenshots/01-login.png]]
+![登录页](./report-assets/screenshots/01-login.png)
 2. 学生端总览页：
-![[./report-assets/screenshots/02-student-overview.png]]
+![学生端总览页](./report-assets/screenshots/02-student-overview.png)
 3. 智能搜索页（含“最佳结果+更多匹配”）：
-![[./report-assets/screenshots/03-student-search.png]]
+![智能搜索页](./report-assets/screenshots/03-student-search.png)
 4. 预约填写弹窗（单次/批量/周期任一或多张）：
-![[./report-assets/screenshots/04-reservation-form.png]]
+![预约填写弹窗](./report-assets/screenshots/04-reservation-form.png)
 5. 我的预约页：
-![[./report-assets/screenshots/05-my-reservations.png]]
+![我的预约页](./report-assets/screenshots/05-my-reservations.png)
 6. 管理端概览页：
-![[./report-assets/screenshots/06-admin-dashboard.png]]
+![管理端概览页](./report-assets/screenshots/06-admin-dashboard.png)
 7. 管理端审核页（含 AI 风险标签）：
-![[./report-assets/screenshots/07-admin-audit.png]]
+![管理端审核页](./report-assets/screenshots/07-admin-audit.png)
 8. 管理端场馆管理页（含维护操作）：
-![[./report-assets/screenshots/08-admin-venues.png]]
+![管理端场馆管理页](./report-assets/screenshots/08-admin-venues.png)
 9. 管理端用户管理页：
-![[./report-assets/screenshots/09-admin-users.png]]
+![管理端用户管理页](./report-assets/screenshots/09-admin-users.png)
 10. 系统设置页（LLM 配置/导入）：
-![[./report-assets/screenshots/10-system-settings.png]]
+![系统设置页](./report-assets/screenshots/10-system-settings.png)
 
 ### 9.2 模拟运行全流程截图或演示视频
 
