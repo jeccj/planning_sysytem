@@ -5,7 +5,7 @@ const bcrypt = require('bcryptjs');
 
 const DEFAULT_DB_PATH = path.resolve(process.cwd(), '..', 'campus.db');
 
-const USER_HEADERS = [
+const USER_REQUIRED_HEADERS = [
   'username',
   'password',
   'role',
@@ -15,19 +15,28 @@ const USER_HEADERS = [
   'managed_floor',
 ];
 
-const VENUE_HEADERS = [
+const VENUE_REQUIRED_HEADERS = [
   'name',
   'type',
   'capacity',
-  'building_name',
-  'floor_label',
-  'room_code',
   'facilities',
   'status',
   'open_hours',
   'description',
   'admin_username',
 ];
+
+const VENUE_OPTIONAL_HEADERS = [
+  'building_name',
+  'floor_label',
+  'room_code',
+  'location',
+  'image_url',
+  'photos',
+];
+
+const USER_HEADERS = [...USER_REQUIRED_HEADERS];
+const VENUE_HEADERS = [...VENUE_REQUIRED_HEADERS, ...VENUE_OPTIONAL_HEADERS];
 
 const ROLE_MAP = {
   sys_admin: 'sys_admin',
@@ -51,6 +60,10 @@ const STATUS_MAP = {
   '可用': 'available',
   '维护中': 'maintenance',
 };
+
+const ADMIN_ROLES = new Set(['sys_admin', 'venue_admin', 'floor_admin']);
+const DEFAULT_BUILDING = '未分区';
+const DEFAULT_FLOOR = '未知楼层';
 
 function printUsage() {
   console.log(`\nStructured Import\n\nUsage:\n  node scripts/import-structured.js --users <users.csv> --venues <venues.csv> [--dry-run] [--replace-classrooms] [--db <db-path>]\n\nExamples:\n  node scripts/import-structured.js --users ../data/users.csv --venues ../data/venues.csv --dry-run\n  node scripts/import-structured.js --users ../data/users.csv --venues ../data/venues.csv --replace-classrooms\n`);
@@ -190,11 +203,19 @@ function parseCsv(text) {
   return rows;
 }
 
-function toRecords(csvText, expectedHeaders, fileLabel) {
+function toRecords(csvText, headerSchema, fileLabel) {
   const rows = parseCsv(csvText);
   if (rows.length === 0) {
     throw new Error(`${fileLabel}: file is empty`);
   }
+
+  const requiredHeaders = Array.isArray(headerSchema)
+    ? headerSchema
+    : (headerSchema.requiredHeaders || []);
+  const optionalHeaders = Array.isArray(headerSchema)
+    ? []
+    : (headerSchema.optionalHeaders || []);
+  const allowedHeaders = new Set([...requiredHeaders, ...optionalHeaders]);
 
   const headers = rows[0].map((item) => normalizeText(item));
 
@@ -210,12 +231,12 @@ function toRecords(csvText, expectedHeaders, fileLabel) {
     throw new Error(`${fileLabel}: duplicate headers -> ${Array.from(new Set(duplicateHeaders)).join(', ')}`);
   }
 
-  const unexpected = headers.filter((item) => item && !expectedHeaders.includes(item));
+  const unexpected = headers.filter((item) => item && !allowedHeaders.has(item));
   if (unexpected.length > 0) {
     throw new Error(`${fileLabel}: unexpected headers -> ${unexpected.join(', ')}`);
   }
 
-  const missing = expectedHeaders.filter((item) => !headers.includes(item));
+  const missing = requiredHeaders.filter((item) => !headers.includes(item));
   if (missing.length > 0) {
     throw new Error(`${fileLabel}: missing headers -> ${missing.join(', ')}`);
   }
@@ -241,8 +262,10 @@ function normalizeRole(raw) {
 }
 
 function normalizeType(raw) {
-  const key = normalizeText(raw).toLowerCase();
-  return TYPE_MAP[key] || '';
+  const value = normalizeText(raw);
+  const key = value.toLowerCase();
+  if (!value) return '';
+  return TYPE_MAP[key] || value;
 }
 
 function normalizeStatus(raw) {
@@ -291,8 +314,138 @@ function parseFacilities(raw) {
     .filter(Boolean);
 }
 
-function buildLocation(buildingName, floorLabel, roomCode) {
-  return [buildingName, floorLabel, roomCode].map((item) => normalizeText(item)).filter(Boolean).join(' ');
+function parseStringArray(raw, fieldName) {
+  const value = normalizeText(raw);
+  if (!value) return [];
+
+  if (value.startsWith('[')) {
+    let parsed;
+    try {
+      parsed = JSON.parse(value);
+    } catch (error) {
+      throw new Error(`invalid ${fieldName} JSON: ${value}`);
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error(`${fieldName} JSON must be array: ${value}`);
+    }
+    return parsed.map((item) => normalizeText(item)).filter(Boolean);
+  }
+
+  return value
+    .split(/[;,|，]/)
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+}
+
+function parsePhotos(raw) {
+  return parseStringArray(raw, 'photos');
+}
+
+function parseVenueLocation(location, fallbackName) {
+  const raw = normalizeText(location) || normalizeText(fallbackName);
+  if (!raw) {
+    return {
+      buildingName: DEFAULT_BUILDING,
+      floorLabel: DEFAULT_FLOOR,
+      roomName: '',
+    };
+  }
+
+  const buildingMatch =
+    raw.match(/((?:Building|Block|Tower)\s*[A-Za-z0-9-]+)/i)
+    || raw.match(/([A-Za-z0-9\u4e00-\u9fa5-]+(?:楼|栋|馆|中心|大楼))/)
+    || raw.match(/^([A-Za-z]+(?:-?[A-Za-z0-9]+)?)/);
+
+  const buildingName = buildingMatch && buildingMatch[1]
+    ? normalizeText(buildingMatch[1])
+    : DEFAULT_BUILDING;
+  const floorMatch = raw.match(/((?:B\d+|\d+)[F层]|(?:地上|地下)?\d+层|[一二三四五六七八九十]+层)/);
+  const floorLabel = floorMatch && floorMatch[1]
+    ? normalizeText(floorMatch[1])
+    : DEFAULT_FLOOR;
+
+  let roomName = '';
+  if (buildingMatch && buildingMatch[1]) {
+    roomName = normalizeText(
+      raw.replace(buildingMatch[1], '').replace(/^[\s,，:/\-]+/, '')
+    );
+  } else {
+    const splitParts = raw.split(/[\s,，:/]+/).filter(Boolean);
+    roomName = splitParts.length > 1 ? normalizeText(splitParts.slice(1).join(' ')) : '';
+  }
+
+  if (!roomName) {
+    const roomMatch = raw.match(/([A-Za-z]?\d{2,4}[A-Za-z]?室?)/);
+    roomName = roomMatch && roomMatch[1] ? normalizeText(roomMatch[1]) : '';
+  }
+
+  return {
+    buildingName,
+    floorLabel,
+    roomName,
+  };
+}
+
+function buildLocation(buildingName, floorLabel, roomCode, fallback) {
+  const pieces = [buildingName, floorLabel, roomCode].map((item) => normalizeText(item)).filter(Boolean);
+  if (pieces.length > 0) return pieces.join(' ');
+  return normalizeText(fallback);
+}
+
+function resolveVenueLocationFields({
+  buildingNameRaw,
+  floorLabelRaw,
+  roomCodeRaw,
+  locationRaw,
+  fallbackName,
+}) {
+  const parsed = parseVenueLocation(locationRaw, fallbackName);
+  const buildingName = normalizeText(buildingNameRaw) || parsed.buildingName || DEFAULT_BUILDING;
+  const floorLabel = normalizeText(floorLabelRaw) || parsed.floorLabel || DEFAULT_FLOOR;
+  const roomCode = normalizeText(roomCodeRaw) || parsed.roomName || normalizeText(fallbackName);
+  const location = buildLocation(buildingName, floorLabel, roomCode, locationRaw || fallbackName);
+
+  return {
+    buildingName,
+    floorLabel,
+    roomCode,
+    location,
+  };
+}
+
+function normalizeNullable(value) {
+  const text = normalizeText(value);
+  return text || null;
+}
+
+function buildVenueIdentityKey(buildingName, floorLabel, roomCode) {
+  return [buildingName, floorLabel, roomCode]
+    .map((item) => normalizeText(item).toLowerCase())
+    .join('||');
+}
+
+function assertAdminScopeForVenue(admin, buildingName, floorLabel, rowLine) {
+  if (!admin) return;
+  const role = normalizeText(admin.role);
+  const managedBuilding = normalizeText(admin.managedBuilding);
+  const managedFloor = normalizeText(admin.managedFloor);
+
+  if (!ADMIN_ROLES.has(role)) {
+    throw new Error(`venues.csv line ${rowLine}: admin user role must be sys_admin/venue_admin/floor_admin`);
+  }
+
+  if (role === 'sys_admin') return;
+
+  if (!managedBuilding && !managedFloor) {
+    throw new Error(`venues.csv line ${rowLine}: admin user "${admin.username}" has empty managed scope`);
+  }
+
+  if (managedBuilding && managedBuilding !== buildingName) {
+    throw new Error(`venues.csv line ${rowLine}: admin user "${admin.username}" managed_building mismatch -> ${buildingName}`);
+  }
+  if (managedFloor && managedFloor !== floorLabel) {
+    throw new Error(`venues.csv line ${rowLine}: admin user "${admin.username}" managed_floor mismatch -> ${floorLabel}`);
+  }
 }
 
 async function replaceClassrooms(db) {
@@ -308,9 +461,30 @@ async function replaceClassrooms(db) {
   return deleted.changes || 0;
 }
 
+async function loadUserProfiles(db) {
+  const rows = await all(
+    db,
+    `SELECT id, username, role, IFNULL(managed_building, '') AS managed_building, IFNULL(managed_floor, '') AS managed_floor
+     FROM users`
+  );
+
+  const userByUsername = new Map();
+  for (const row of rows) {
+    const username = normalizeText(row.username);
+    if (!username) continue;
+    userByUsername.set(username, {
+      id: row.id,
+      username,
+      role: normalizeText(row.role),
+      managedBuilding: normalizeText(row.managed_building),
+      managedFloor: normalizeText(row.managed_floor),
+    });
+  }
+  return userByUsername;
+}
+
 async function importUsers(db, records) {
-  const userRows = await all(db, `SELECT id, username FROM users`);
-  const userIdByUsername = new Map(userRows.map((item) => [item.username, item.id]));
+  const userByUsername = await loadUserProfiles(db);
 
   let created = 0;
   let updated = 0;
@@ -337,12 +511,12 @@ async function importUsers(db, records) {
       managedFloor = '';
     }
 
-    if (role === 'floor_admin' && !managedBuilding && !managedFloor) {
-      throw new Error(`users.csv line ${row.line}: floor_admin requires managed_building or managed_floor`);
+    if (['venue_admin', 'floor_admin'].includes(role) && !managedBuilding && !managedFloor) {
+      throw new Error(`users.csv line ${row.line}: ${role} requires managed_building or managed_floor`);
     }
 
-    const existingId = userIdByUsername.get(username);
-    if (existingId) {
+    const existingUser = userByUsername.get(username);
+    if (existingUser && existingUser.id) {
       if (password) {
         const hashed = await bcrypt.hash(password, 10);
         await run(
@@ -350,7 +524,7 @@ async function importUsers(db, records) {
           `UPDATE users
            SET hashed_password = ?, role = ?, contact_info = ?, identity_last6 = ?, managed_building = ?, managed_floor = ?
            WHERE id = ?`,
-          [hashed, role, contactInfo, identityLast6, managedBuilding, managedFloor, existingId]
+          [hashed, role, contactInfo, identityLast6, managedBuilding, managedFloor, existingUser.id]
         );
       } else {
         await run(
@@ -358,9 +532,16 @@ async function importUsers(db, records) {
           `UPDATE users
            SET role = ?, contact_info = ?, identity_last6 = ?, managed_building = ?, managed_floor = ?
            WHERE id = ?`,
-          [role, contactInfo, identityLast6, managedBuilding, managedFloor, existingId]
+          [role, contactInfo, identityLast6, managedBuilding, managedFloor, existingUser.id]
         );
       }
+      userByUsername.set(username, {
+        id: existingUser.id,
+        username,
+        role,
+        managedBuilding,
+        managedFloor,
+      });
       updated += 1;
       continue;
     }
@@ -377,81 +558,113 @@ async function importUsers(db, records) {
       [username, hashedPassword, role, contactInfo, identityLast6, managedBuilding, managedFloor]
     );
 
-    userIdByUsername.set(username, insertRes.lastID);
+    userByUsername.set(username, {
+      id: insertRes.lastID,
+      username,
+      role,
+      managedBuilding,
+      managedFloor,
+    });
     created += 1;
   }
 
   return {
     created,
     updated,
-    userIdByUsername,
+    userByUsername,
   };
 }
 
-async function importVenues(db, records, userIdByUsername) {
+async function importVenues(db, records, userByUsername) {
   let created = 0;
   let updated = 0;
+  const seenIdentityKeys = new Set();
 
   for (const row of records) {
     const data = row.data;
     const name = normalizeText(data.name);
     const type = normalizeType(data.type);
     const capacity = parseCapacity(data.capacity);
-    const buildingName = normalizeText(data.building_name);
-    const floorLabel = normalizeText(data.floor_label);
-    const roomCode = normalizeText(data.room_code);
+    const locationInput = normalizeText(data.location);
+    const locationFields = resolveVenueLocationFields({
+      buildingNameRaw: data.building_name,
+      floorLabelRaw: data.floor_label,
+      roomCodeRaw: data.room_code,
+      locationRaw: locationInput,
+      fallbackName: name,
+    });
+    const buildingName = locationFields.buildingName;
+    const floorLabel = locationFields.floorLabel;
+    const roomCode = locationFields.roomCode;
+    const location = locationFields.location;
     const facilities = parseFacilities(data.facilities);
     const status = normalizeStatus(data.status);
     const openHours = normalizeText(data.open_hours);
     const description = normalizeText(data.description);
+    const imageUrl = normalizeNullable(data.image_url);
+    const photos = parsePhotos(data.photos);
     const adminUsername = normalizeText(data.admin_username);
 
     if (!name) throw new Error(`venues.csv line ${row.line}: name is required`);
     if (!type) throw new Error(`venues.csv line ${row.line}: invalid type -> ${data.type}`);
-    if (!buildingName) throw new Error(`venues.csv line ${row.line}: building_name is required`);
-    if (!floorLabel) throw new Error(`venues.csv line ${row.line}: floor_label is required`);
-    if (!roomCode) throw new Error(`venues.csv line ${row.line}: room_code is required`);
     if (!status) throw new Error(`venues.csv line ${row.line}: invalid status -> ${data.status}`);
     if (!adminUsername) throw new Error(`venues.csv line ${row.line}: admin_username is required`);
 
-    const adminId = userIdByUsername.get(adminUsername);
-    if (!adminId) {
-      throw new Error(`venues.csv line ${row.line}: admin_username not found -> ${adminUsername}`);
+    if (!buildingName || buildingName === DEFAULT_BUILDING) {
+      throw new Error(`venues.csv line ${row.line}: missing building_name and unable to resolve from location/name`);
+    }
+    if (!floorLabel || floorLabel === DEFAULT_FLOOR) {
+      throw new Error(`venues.csv line ${row.line}: missing floor_label and unable to resolve from location`);
+    }
+    if (!roomCode) {
+      throw new Error(`venues.csv line ${row.line}: room_code is required (or resolvable from location/name)`);
     }
 
-    const location = buildLocation(buildingName, floorLabel, roomCode);
+    const identityKey = buildVenueIdentityKey(buildingName, floorLabel, roomCode);
+    if (seenIdentityKeys.has(identityKey)) {
+      throw new Error(`venues.csv line ${row.line}: duplicate building/floor/room in file -> ${buildingName} ${floorLabel} ${roomCode}`);
+    }
+    seenIdentityKeys.add(identityKey);
+
+    const admin = userByUsername.get(adminUsername);
+    if (!admin || !admin.id) {
+      throw new Error(`venues.csv line ${row.line}: admin_username not found -> ${adminUsername}`);
+    }
+    assertAdminScopeForVenue(admin, buildingName, floorLabel, row.line);
 
     const existing = await get(
       db,
       `SELECT id
        FROM venues
-       WHERE type = ?
-         AND IFNULL(building_name, '') = ?
+       WHERE IFNULL(building_name, '') = ?
          AND IFNULL(floor_label, '') = ?
          AND IFNULL(room_code, '') = ?
        LIMIT 1`,
-      [type, buildingName, floorLabel, roomCode]
+      [buildingName, floorLabel, roomCode]
     );
 
     if (existing && existing.id) {
       await run(
         db,
         `UPDATE venues
-         SET name = ?, capacity = ?, location = ?, facilities = ?, status = ?, admin_id = ?, open_hours = ?, description = ?,
-             building_name = ?, floor_label = ?, room_code = ?
+         SET name = ?, type = ?, capacity = ?, location = ?, facilities = ?, status = ?, admin_id = ?, open_hours = ?, description = ?,
+             building_name = ?, floor_label = ?, room_code = ?, image_url = ?, photos = ?
          WHERE id = ?`,
         [
           name,
+          type,
           capacity,
           location,
           JSON.stringify(facilities),
           status,
-          adminId,
+          admin.id,
           openHours,
           description,
           buildingName,
           floorLabel,
           roomCode,
+          imageUrl,
+          JSON.stringify(photos),
           existing.id,
         ]
       );
@@ -461,8 +674,8 @@ async function importVenues(db, records, userIdByUsername) {
         db,
         `INSERT INTO venues (
           name, type, capacity, location, facilities, status, admin_id, open_hours, description,
-          building_name, floor_label, room_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          building_name, floor_label, room_code, image_url, photos
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           name,
           type,
@@ -470,12 +683,14 @@ async function importVenues(db, records, userIdByUsername) {
           location,
           JSON.stringify(facilities),
           status,
-          adminId,
+          admin.id,
           openHours,
           description,
           buildingName,
           floorLabel,
           roomCode,
+          imageUrl,
+          JSON.stringify(photos),
         ]
       );
       created += 1;
@@ -503,13 +718,16 @@ async function runStructuredImport({
   try {
     await run(db, 'BEGIN TRANSACTION');
 
-    let userStats = { created: 0, updated: 0, userIdByUsername: new Map() };
+    let userStats = { created: 0, updated: 0, userByUsername: new Map() };
     if (hasUsersFile) {
-      const userRecords = toRecords(String(usersCsvText), USER_HEADERS, 'users.csv');
+      const userRecords = toRecords(
+        String(usersCsvText),
+        { requiredHeaders: USER_REQUIRED_HEADERS },
+        'users.csv'
+      );
       userStats = await importUsers(db, userRecords);
     } else {
-      const rows = await all(db, 'SELECT id, username FROM users');
-      userStats.userIdByUsername = new Map(rows.map((item) => [item.username, item.id]));
+      userStats.userByUsername = await loadUserProfiles(db);
     }
 
     let deletedClassrooms = 0;
@@ -519,8 +737,15 @@ async function runStructuredImport({
 
     let venueStats = { created: 0, updated: 0 };
     if (hasVenuesFile) {
-      const venueRecords = toRecords(String(venuesCsvText), VENUE_HEADERS, 'venues.csv');
-      venueStats = await importVenues(db, venueRecords, userStats.userIdByUsername);
+      const venueRecords = toRecords(
+        String(venuesCsvText),
+        {
+          requiredHeaders: VENUE_REQUIRED_HEADERS,
+          optionalHeaders: VENUE_OPTIONAL_HEADERS,
+        },
+        'venues.csv'
+      );
+      venueStats = await importVenues(db, venueRecords, userStats.userByUsername);
     }
 
     if (dryRun) {
