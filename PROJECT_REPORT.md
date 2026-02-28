@@ -9,7 +9,7 @@
 ### 1.2 技术栈总览
 
 | 层面 | 技术选型 | 版本 |
-|------|----------|------|
+| ------ | ---------- | ------ |
 | 前端框架 | Vue 3 (Composition API / `<script setup>`) | 3.3.0 |
 | 前端构建 | Vite | 4.5.0 |
 | UI 组件库 | Element Plus | 2.4.0 |
@@ -115,7 +115,7 @@ flowchart LR
 ### 2.1 后端核心模块
 
 | 模块 | 位置 | 职责说明 |
-|------|------|----------|
+| ------ | ------ | ---------- |
 | `auth` | `src/auth/` | 登录认证、JWT 签发、改密、忘记密码、单活会话（sid）控制 |
 | `users` | `src/users/` | 用户 CRUD、角色管理、管理范围（楼栋/楼层）分配 |
 | `venues` | `src/venues/` | 场馆 CRUD、结构视图、可用性看板、智能检索、维护调度 |
@@ -129,7 +129,7 @@ flowchart LR
 ### 2.2 前端核心模块
 
 | 模块 | 位置 | 职责说明 |
-|------|------|----------|
+| ------ | ------ | ---------- |
 | 登录认证 | `views/Login.vue` | 登录表单、忘记密码、首次登录检测 |
 | 状态管理 | `stores/auth.js` | Pinia Store，管理 token/user/持久化 |
 | 主布局 | `layout/MainLayout.vue` | VisionOS 风格侧边栏、浮动头部、通知面板、强制改密弹窗 |
@@ -165,6 +165,7 @@ flowchart TD
 **智能检索链路详解**：
 
 1. **意图解析**：调用 `llmService.parseIntent()` 将自然语言转为结构化 JSON：
+
    ```json
    {
      "date": "2026-03-01",
@@ -205,7 +206,7 @@ stateDiagram-v2
 **状态转移规则**（`ALLOWED_STATUS_TRANSITIONS`）：
 
 | 当前状态 | 允许转移到 |
-|----------|------------|
+| ---------- | ------------ |
 | `pending` | `approved`, `rejected`, `canceled` |
 | `approved` | `used`, `canceled`, `rejected` |
 | `maintenance` | `canceled` |
@@ -266,7 +267,7 @@ sequenceDiagram
 
 ### 4.2 本地开发启动
 
-**方式一：分别启动前后端**
+#### 方式一：分别启动前后端
 
 ```bash
 # 1. 启动后端
@@ -280,7 +281,7 @@ npm install
 npm run dev    # 监听 http://localhost:5173，代理 /api → 8001
 ```
 
-**方式二：Docker 一键部署**
+#### 方式二：Docker 一键部署
 
 ```bash
 docker-compose up -d --build
@@ -289,9 +290,9 @@ docker-compose up -d --build
 
 ### 4.3 默认账户
 
-| 角色 | 用户名 | 默认密码 |
-|------|--------|----------|
-| 系统管理员 | `admin` | `admin123` |
+| 角色         | 用户名  | 默认密码     |
+| ------------ | ------- | ------------ |
+| 系统管理员   | `admin` | `admin123`   |
 
 > **首次登录强制改密**：所有用户首次登录后必须修改密码。
 
@@ -314,7 +315,7 @@ docker-compose up -d --build
 ### 4.6 API 端点速查
 
 | 模块 | 端点前缀 | 主要操作 |
-|------|----------|----------|
+| ------ | ---------- | ---------- |
 | 认证 | `/api/auth` | login, change-password, forgot-password |
 | 用户 | `/api/users` | CRUD, me, reset-password |
 | 场馆 | `/api/venues` | CRUD, search, search-smart, maintenance |
@@ -491,13 +492,13 @@ while (rows.length < desiredOccurrences && cursor <= maxUntil && guard < 5000) {
 
 **算法说明**：
 
-| 参数 | 作用 |
-|------|------|
-| `frequency` | 支持 `daily`（日频）与 `weekly`（周频）两类 |
-| `interval` | 间隔数（如间隔 2 表示隔周/隔日）|
-| `occurrences` | 生成次数上限（最大 100 次）|
-| `until` | 截止日期（与 occurrences 二选一）|
-| `week_days` | 周频模式下的星期选择（0=周日, 1=周一...）|
+| 参数          | 作用                                      |
+|---------------|------------------------------------------ |
+| `frequency`   | 支持 `daily`（日频）与 `weekly`（周频）两类 |
+| `interval`    | 间隔数（如间隔 2 表示隔周/隔日） |
+| `occurrences` | 生成次数上限（最大 100 次） |
+| `until`       | 截止日期（与 occurrences 二选一）       |
+| `week_days`   | 周频模式下的星期选择（0=周日, 1=周一...）|
 
 **安全防护**：
 
@@ -557,7 +558,7 @@ private drainAuditQueue() {
 **机制说明**：
 
 | 组件 | 作用 |
-|------|------|
+| ------ | ------ |
 | `auditQueue` | 待审核预约 ID 队列 |
 | `pendingAuditIds` | 避免同一预约重复入队 |
 | `MAX_AUDIT_CONCURRENCY = 2` | 控制并发审查量 |
@@ -613,7 +614,7 @@ private async callLlm(prompt: string): Promise<string> {
 **关键设计**：
 
 | 特性 | 实现方式 |
-|------|----------|
+| ------ | ---------- |
 | 多 Provider 支持 | `gemini` / `deepseek` / `custom` 三类，按 provider 字段切换 |
 | 配置缓存 | TTL 60 秒，减少数据库读取频次 |
 | 超时控制 | `withTimeout()` 包装，12 秒超时抛出异常 |
@@ -863,7 +864,7 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 ### 8.5 可进一步优化方向
 
 | 优化项 | 建议方案 | 预期收益 |
-|--------|----------|----------|
+| -------- | ---------- | ---------- |
 | AI 审核队列持久化 | 外置到 Redis Stream 或消息队列 | 服务重启后任务不丢失 |
 | 预约幂等键 | `venue_id + user_id + start_time` 哈希 | 防止客户端重复提交 |
 | 检索权重配置化 | 存入 `system_config` 表 | 管理员可按校内需求调整 |
@@ -875,16 +876,26 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 
 ### 9.1 各模块截图清单
 
-1. 登录页：`01-login.png`
-2. 学生端总览页：`02-student-overview.png`
-3. 智能搜索页（含“最佳结果+更多匹配”）：`03-student-search.png`
-4. 预约填写弹窗（单次/批量/周期任一或多张）：`04-reservation-form.png`
-5. 我的预约页：`05-my-reservations.png`
-6. 管理端概览页：`06-admin-dashboard.png`
-7. 管理端审核页（含 AI 风险标签）：`07-admin-audit.png`
-8. 管理端场馆管理页（含维护操作）：`08-admin-venues.png`
-9. 管理端用户管理页：`09-admin-users.png`
-10. 系统设置页（LLM 配置/导入）：`10-system-settings.png`
+1. 登录页：
+![[./report-assets/screenshots/01-login.png]]
+2. 学生端总览页：
+![[./report-assets/screenshots/02-student-overview.png]]
+3. 智能搜索页（含“最佳结果+更多匹配”）：
+![[./report-assets/screenshots/03-student-search.png]]
+4. 预约填写弹窗（单次/批量/周期任一或多张）：
+![[./report-assets/screenshots/04-reservation-form.png]]
+5. 我的预约页：
+![[./report-assets/screenshots/05-my-reservations.png]]
+6. 管理端概览页：
+![[./report-assets/screenshots/06-admin-dashboard.png]]
+7. 管理端审核页（含 AI 风险标签）：
+![[./report-assets/screenshots/07-admin-audit.png]]
+8. 管理端场馆管理页（含维护操作）：
+![[./report-assets/screenshots/08-admin-venues.png]]
+9. 管理端用户管理页：
+![[./report-assets/screenshots/09-admin-users.png]]
+10. 系统设置页（LLM 配置/导入）：
+![[./report-assets/screenshots/10-system-settings.png]]
 
 ### 9.2 模拟运行全流程截图或演示视频
 
@@ -914,7 +925,7 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 本项目实现了一个功能完整的校园场馆预约系统，主要成果包括：
 
 | 维度 | 成果 |
-|------|------|
+| ------ | ------ |
 | **功能完整性** | 覆盖预约全生命周期：搜索→申请→审批→使用→取消 |
 | **智能化能力** | 自然语言检索、AI 风险审核、意图解析 |
 | **安全性设计** | 四级 RBAC、JWT 单活会话、数据范围隔离 |
@@ -940,7 +951,7 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 ### 10.4 后续展望
 
 | 方向 | 具体计划 |
-|------|----------|
+| ------ | ---------- |
 | 持久化队列 | 将 AI 审核队列迁移至 Redis Stream |
 | 学习排序 | 检索结果引入 Learning to Rank 二阶段重排 |
 | 移动端适配 | 开发 uni-app 或 React Native 移动客户端 |
@@ -951,4 +962,3 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 **报告版本**：v1.0  
 **生成日期**：2025 年 1 月  
 **作者**：[请填写姓名/学号]
-
