@@ -1,5 +1,5 @@
 username,password,role,contact_info,identity_last6,managed_building,managed_floor
 admin,Admin@123456,sys_admin,system admin,990001,,
 student_demo,Student@123456,student_teacher,class 2026,990101,,
-venue_admin_mingde,Admin@123456,venue_admin,venue-admin:明德楼,880001,明德楼,
-floor_admin_mingde_1,Admin@123456,floor_admin,floor-admin:明德楼/1层,881001,明德楼,1层
+venue_admin_jianxing,Admin@123456,venue_admin,venue-admin:健行楼,880001,健行楼,
+floor_admin_jianxing_1,Admin@123456,floor_admin,floor-admin:健行楼/1层,881001,健行楼,1层
