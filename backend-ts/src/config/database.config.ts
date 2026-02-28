@@ -10,8 +10,20 @@ import * as path from 'path';
 
 export const databaseConfig: TypeOrmModuleOptions = {
   type: 'sqlite',
-  database: path.join(__dirname, '../..', process.env.DATABASE_PATH || 'campus.db'),
-  entities: [User, Venue, Reservation, ReservationSlot, Announcement, Notification, SystemConfig],
+  database: path.join(
+    __dirname,
+    '../..',
+    process.env.DATABASE_PATH || 'campus.db',
+  ),
+  entities: [
+    User,
+    Venue,
+    Reservation,
+    ReservationSlot,
+    Announcement,
+    Notification,
+    SystemConfig,
+  ],
   // Reduce transient SQLITE_BUSY failures under concurrent writes.
   busyTimeout: Number(process.env.SQLITE_BUSY_TIMEOUT_MS || 10000),
   busyErrorRetry: Number(process.env.SQLITE_BUSY_RETRY_MS || 200),

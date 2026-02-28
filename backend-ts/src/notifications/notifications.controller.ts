@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { NotificationResponseDto } from './dto/notification-response.dto';
@@ -12,62 +24,74 @@ import { UserRole } from '../common/enums';
 @Controller('notifications')
 @UseGuards(JwtAuthGuard)
 export class NotificationsController {
-    constructor(private readonly notificationsService: NotificationsService) { }
+  constructor(private readonly notificationsService: NotificationsService) {}
 
-    @Get()
-    async findAll(
-        @CurrentUser() user: User,
-        @Query('skip') skip: string = '0',
-        @Query('limit') limit: string = '100',
-    ): Promise<NotificationResponseDto[]> {
-        const notifications = await this.notificationsService.findAllForUser(user.id, +skip, +limit);
-        return notifications.map(NotificationResponseDto.fromEntity);
-    }
+  @Get()
+  async findAll(
+    @CurrentUser() user: User,
+    @Query('skip') skip: string = '0',
+    @Query('limit') limit: string = '100',
+  ): Promise<NotificationResponseDto[]> {
+    const notifications = await this.notificationsService.findAllForUser(
+      user.id,
+      +skip,
+      +limit,
+    );
+    return notifications.map(NotificationResponseDto.fromEntity);
+  }
 
-    @Get('unread-count')
-    async getUnreadCount(@CurrentUser() user: User): Promise<{ count: number }> {
-        const count = await this.notificationsService.countUnreadForUser(user.id);
-        return { count };
-    }
+  @Get('unread-count')
+  async getUnreadCount(@CurrentUser() user: User): Promise<{ count: number }> {
+    const count = await this.notificationsService.countUnreadForUser(user.id);
+    return { count };
+  }
 
-    @Post()
-    @UseGuards(RolesGuard)
-    @Roles(UserRole.SYS_ADMIN)
-    async create(@Body() createNotificationDto: CreateNotificationDto): Promise<NotificationResponseDto> {
-        const n = await this.notificationsService.create(createNotificationDto);
-        return NotificationResponseDto.fromEntity(n);
-    }
+  @Post()
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SYS_ADMIN)
+  async create(
+    @Body() createNotificationDto: CreateNotificationDto,
+  ): Promise<NotificationResponseDto> {
+    const n = await this.notificationsService.create(createNotificationDto);
+    return NotificationResponseDto.fromEntity(n);
+  }
 
-    @Put(':id/read')
-    async markAsRead(
-        @Param('id') id: string,
-        @CurrentUser() user: User,
-    ): Promise<NotificationResponseDto> {
-        try {
-            const n = await this.notificationsService.markAsRead(+id, user.id);
-            return NotificationResponseDto.fromEntity(n);
-        } catch (error) {
-            if (error instanceof HttpException) throw error;
-            throw new HttpException(error.message || 'Notification not found', HttpStatus.NOT_FOUND);
-        }
+  @Put(':id/read')
+  async markAsRead(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+  ): Promise<NotificationResponseDto> {
+    try {
+      const n = await this.notificationsService.markAsRead(+id, user.id);
+      return NotificationResponseDto.fromEntity(n);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        error.message || 'Notification not found',
+        HttpStatus.NOT_FOUND,
+      );
     }
+  }
 
-    @Put('read-all')
-    async markAllAsRead(@CurrentUser() user: User): Promise<{ updated: number }> {
-        const updated = await this.notificationsService.markAllAsRead(user.id);
-        return { updated };
-    }
+  @Put('read-all')
+  async markAllAsRead(@CurrentUser() user: User): Promise<{ updated: number }> {
+    const updated = await this.notificationsService.markAllAsRead(user.id);
+    return { updated };
+  }
 
-    @Delete(':id')
-    async remove(
-        @Param('id') id: string,
-        @CurrentUser() user: User,
-    ): Promise<void> {
-        try {
-            await this.notificationsService.remove(+id, user.id);
-        } catch (error) {
-            if (error instanceof HttpException) throw error;
-            throw new HttpException(error.message || 'Notification not found', HttpStatus.NOT_FOUND);
-        }
+  @Delete(':id')
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+  ): Promise<void> {
+    try {
+      await this.notificationsService.remove(+id, user.id);
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        error.message || 'Notification not found',
+        HttpStatus.NOT_FOUND,
+      );
     }
+  }
 }

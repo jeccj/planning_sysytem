@@ -3,8 +3,8 @@ import { LlmService } from './llm.service';
 import { SystemConfigModule } from '../system-config/system-config.module';
 
 @Module({
-    imports: [SystemConfigModule],
-    providers: [LlmService],
-    exports: [LlmService],
+  imports: [SystemConfigModule],
+  providers: [LlmService],
+  exports: [LlmService],
 })
-export class LlmModule { }
+export class LlmModule {}

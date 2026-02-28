@@ -3,7 +3,7 @@ import { NlpController } from './nlp.controller';
 import { LlmModule } from '../llm/llm.module';
 
 @Module({
-    imports: [LlmModule],
-    controllers: [NlpController],
+  imports: [LlmModule],
+  controllers: [NlpController],
 })
-export class NlpModule { }
+export class NlpModule {}

@@ -66,8 +66,14 @@ const handleLogin = async () => {
     console.error("Login failed:", error)
     let errorMessage = '登录失败，请稍后重试'
 
-    if (error.response && error.response.data) {
-      const detail = error.response.data.detail
+    if (!error?.response) {
+      if (error?.code === 'ECONNABORTED') {
+        errorMessage = '登录请求超时，请稍后重试'
+      } else {
+        errorMessage = '无法连接服务器，请检查网络或服务状态'
+      }
+    } else if (error.response && error.response.data) {
+      const detail = error.response.data.detail ?? error.response.data.message ?? error.response.data.error
       if (typeof detail === 'string') {
         errorMessage = `登录失败: ${detail}`
       } else if (Array.isArray(detail)) {

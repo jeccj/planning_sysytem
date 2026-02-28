@@ -7,9 +7,9 @@ import { AuthModule } from '../auth/auth.module';
 
 @Global()
 @Module({
-    imports: [TypeOrmModule.forFeature([SystemConfig]), AuthModule],
-    controllers: [SystemConfigController],
-    providers: [SystemConfigService],
-    exports: [SystemConfigService],
+  imports: [TypeOrmModule.forFeature([SystemConfig]), AuthModule],
+  controllers: [SystemConfigController],
+  providers: [SystemConfigService],
+  exports: [SystemConfigService],
 })
-export class SystemConfigModule { }
+export class SystemConfigModule {}

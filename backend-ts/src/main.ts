@@ -6,14 +6,50 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { SystemConfigService } from './system-config/system-config.service';
+import { DataSource } from 'typeorm';
+import { ensureLegacySqliteUsersColumns } from './common/sqlite-schema.util';
+
+const IMPORT_MAINTENANCE_ACTIVE_KEY = 'import_maintenance_active';
+const IMPORT_MAINTENANCE_MESSAGE_KEY = 'import_maintenance_message';
 
 async function bootstrap() {
-
   const app = await NestFactory.create(AppModule);
+
+  // Backward compatibility: old sqlite db files may miss newer user session columns.
+  try {
+    const dataSource = app.get(DataSource);
+    await ensureLegacySqliteUsersColumns(dataSource);
+  } catch (error) {
+    console.warn(
+      '[bootstrap] Failed to patch legacy sqlite users schema:',
+      error?.message || error,
+    );
+  }
+
+  // Guard against stale maintenance lock after abnormal process exit.
+  try {
+    const configService = app.get(SystemConfigService);
+    await configService.setBoolean(
+      IMPORT_MAINTENANCE_ACTIVE_KEY,
+      false,
+      'Whether import maintenance mode is active',
+    );
+    await configService.setConfig(
+      IMPORT_MAINTENANCE_MESSAGE_KEY,
+      '',
+      'Import maintenance message',
+    );
+  } catch (error) {
+    console.warn(
+      '[bootstrap] Failed to clear stale import maintenance flag:',
+      error?.message || error,
+    );
+  }
 
   // Set global API prefix so frontend can use /api/... in production
   app.setGlobalPrefix('api', {
-    exclude: [],  // all routes get /api prefix
+    exclude: [], // all routes get /api prefix
   });
 
   // CORS configuration – allow any origin so the front-end can be
@@ -26,17 +62,19 @@ async function bootstrap() {
   });
 
   // Global validation pipe
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    transform: true,
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+    }),
+  );
 
   // Serve uploaded files
   const expressApp = app.getHttpAdapter().getInstance();
   const express = require('express');
   const uploadsPath = path.join(__dirname, '..', 'uploads');
   expressApp.use('/uploads', express.static(uploadsPath));
-  expressApp.use('/api/uploads', express.static(uploadsPath));  // 同时支持 /api/uploads 路径
+  expressApp.use('/api/uploads', express.static(uploadsPath)); // 同时支持 /api/uploads 路径
 
   // Serve built frontend (npm run build in frontend/, output to frontend/dist)
   const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');

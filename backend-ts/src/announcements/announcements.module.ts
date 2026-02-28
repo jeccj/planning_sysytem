@@ -5,8 +5,8 @@ import { AnnouncementsController } from './announcements.controller';
 import { Announcement } from './entities/announcement.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Announcement])],
-    controllers: [AnnouncementsController],
-    providers: [AnnouncementsService],
+  imports: [TypeOrmModule.forFeature([Announcement])],
+  controllers: [AnnouncementsController],
+  providers: [AnnouncementsService],
 })
-export class AnnouncementsModule { }
+export class AnnouncementsModule {}

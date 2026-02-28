@@ -57,69 +57,76 @@ export const FIXED_AUDIT_EXAMPLE = `【固定返回示例（不可修改）】
 {"score":22,"reason":"学术交流活动，规模适中，未发现明显安全风险。"}`;
 
 export const LLM_PROMPT_CONFIG_KEYS = [
-    'llm_system_prompt',
-    'llm_json_guard_prompt',
-    'llm_parse_intent_rules',
-    'llm_audit_rules',
-    'llm_expand_proposal_rules',
+  'llm_system_prompt',
+  'llm_json_guard_prompt',
+  'llm_parse_intent_rules',
+  'llm_audit_rules',
+  'llm_expand_proposal_rules',
 ] as const;
 
 export const LLM_PROMPT_LOCKED_KEYS = [
-    'llm_parse_intent_prompt',
-    'llm_audit_prompt',
-    'llm_parse_intent_example',
-    'llm_audit_example',
-    'parse_intent_contract',
-    'parse_intent_example',
-    'audit_contract',
-    'audit_example',
+  'llm_parse_intent_prompt',
+  'llm_audit_prompt',
+  'llm_parse_intent_example',
+  'llm_audit_example',
+  'parse_intent_contract',
+  'parse_intent_example',
+  'audit_contract',
+  'audit_example',
 ] as const;
 
 export function getDefaultLlmPrompts() {
-    return {
-        editable_defaults: {
-            llm_system_prompt: DEFAULT_LLM_SYSTEM_PROMPT,
-            llm_json_guard_prompt: DEFAULT_LLM_JSON_GUARD_PROMPT,
-            llm_parse_intent_rules: DEFAULT_LLM_PARSE_INTENT_RULES,
-            llm_audit_rules: DEFAULT_LLM_AUDIT_RULES,
-            llm_expand_proposal_rules: DEFAULT_LLM_EXPAND_PROPOSAL_RULES,
-        },
-        fixed_sections: {
-            parse_intent_contract: FIXED_PARSE_INTENT_CONTRACT,
-            parse_intent_example: FIXED_PARSE_INTENT_EXAMPLE,
-            audit_contract: FIXED_AUDIT_CONTRACT,
-            audit_example: FIXED_AUDIT_EXAMPLE,
-        },
-    };
+  return {
+    editable_defaults: {
+      llm_system_prompt: DEFAULT_LLM_SYSTEM_PROMPT,
+      llm_json_guard_prompt: DEFAULT_LLM_JSON_GUARD_PROMPT,
+      llm_parse_intent_rules: DEFAULT_LLM_PARSE_INTENT_RULES,
+      llm_audit_rules: DEFAULT_LLM_AUDIT_RULES,
+      llm_expand_proposal_rules: DEFAULT_LLM_EXPAND_PROPOSAL_RULES,
+    },
+    fixed_sections: {
+      parse_intent_contract: FIXED_PARSE_INTENT_CONTRACT,
+      parse_intent_example: FIXED_PARSE_INTENT_EXAMPLE,
+      audit_contract: FIXED_AUDIT_CONTRACT,
+      audit_example: FIXED_AUDIT_EXAMPLE,
+    },
+  };
 }
 
-export function buildParseIntentPrompt(userQuery: string, currentTime: string, extraRules: string): string {
-    const rules = (extraRules || '').trim();
-    const userRulesBlock = rules
-        ? `【管理员可编辑补充规则】\n${rules}`
-        : '';
+export function buildParseIntentPrompt(
+  userQuery: string,
+  currentTime: string,
+  extraRules: string,
+): string {
+  const rules = (extraRules || '').trim();
+  const userRulesBlock = rules ? `【管理员可编辑补充规则】\n${rules}` : '';
 
-    return [
-        '你是高校场地预约系统的意图解析器。',
-        userRulesBlock,
-        FIXED_PARSE_INTENT_CONTRACT,
-        `用户查询：${userQuery}`,
-        `当前时间：${currentTime}`,
-        FIXED_PARSE_INTENT_EXAMPLE,
-    ].filter(Boolean).join('\n\n');
+  return [
+    '你是高校场地预约系统的意图解析器。',
+    userRulesBlock,
+    FIXED_PARSE_INTENT_CONTRACT,
+    `用户查询：${userQuery}`,
+    `当前时间：${currentTime}`,
+    FIXED_PARSE_INTENT_EXAMPLE,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
-export function buildAuditPrompt(proposalText: string, extraRules: string): string {
-    const rules = (extraRules || '').trim();
-    const userRulesBlock = rules
-        ? `【管理员可编辑补充规则】\n${rules}`
-        : '';
+export function buildAuditPrompt(
+  proposalText: string,
+  extraRules: string,
+): string {
+  const rules = (extraRules || '').trim();
+  const userRulesBlock = rules ? `【管理员可编辑补充规则】\n${rules}` : '';
 
-    return [
-        '你是高校场地活动风险审核助手。',
-        userRulesBlock,
-        FIXED_AUDIT_CONTRACT,
-        `活动信息：${proposalText}`,
-        FIXED_AUDIT_EXAMPLE,
-    ].filter(Boolean).join('\n\n');
+  return [
+    '你是高校场地活动风险审核助手。',
+    userRulesBlock,
+    FIXED_AUDIT_CONTRACT,
+    `活动信息：${proposalText}`,
+    FIXED_AUDIT_EXAMPLE,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }

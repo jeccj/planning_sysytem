@@ -28,4 +28,4 @@ import { SystemConfigModule } from './system-config/system-config.module';
   controllers: [AppController],
   providers: [],
 })
-export class AppModule { }
+export class AppModule {}

@@ -10,13 +10,18 @@ import { ReservationSlot } from '../reservations/entities/reservation-slot.entit
 import { UsersModule } from '../users/users.module';
 
 @Module({
-    imports: [
-        TypeOrmModule.forFeature([Venue, Reservation, Notification, ReservationSlot]),
-        LlmModule,
-        UsersModule,
-    ],
-    controllers: [VenuesController],
-    providers: [VenuesService],
-    exports: [VenuesService],
+  imports: [
+    TypeOrmModule.forFeature([
+      Venue,
+      Reservation,
+      Notification,
+      ReservationSlot,
+    ]),
+    LlmModule,
+    UsersModule,
+  ],
+  controllers: [VenuesController],
+  providers: [VenuesService],
+  exports: [VenuesService],
 })
-export class VenuesModule { }
+export class VenuesModule {}
