@@ -43,7 +43,7 @@ export const useAuthStore = defineStore('auth', () => {
     const user = ref(readStoredUser())
     const isAuthenticated = computed(() => !!token.value)
     const isSysAdmin = computed(() => user.value?.role === 'sys_admin')
-    const isVenueAdmin = computed(() => ['venue_admin', 'floor_admin'].includes(user.value?.role))
+    const isVenueAdmin = computed(() => user.value?.role === 'venue_admin')
 
     const setToken = (nextToken) => {
         const normalized = String(nextToken || '')

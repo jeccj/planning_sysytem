@@ -12,6 +12,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const venues = ref([])
 const users = ref([])
+const hierarchyCatalog = ref([])
 const showModal = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
@@ -46,18 +47,34 @@ const managedFloor = computed(() => (authStore.user?.managed_floor || authStore.
 
 // 获取可分配为场地管理员的用户列表
 const venueAdmins = computed(() => {
-  return users.value.filter(u => ['venue_admin', 'floor_admin'].includes(u.role))
+  return users.value.filter(u => u.role === 'venue_admin')
 })
 
 const venueInScope = (venue) => {
   if (isSysAdmin.value) return true
-  if (!['venue_admin', 'floor_admin'].includes(role.value)) return false
+  if (role.value !== 'venue_admin') return false
   const building = String(venue?.building_name || '').trim()
   const floor = String(venue?.floor_label || '').trim()
   const byBuilding = !managedBuilding.value || managedBuilding.value === building
   const byFloor = !managedFloor.value || managedFloor.value === floor
   return byBuilding && byFloor
 }
+
+const buildingOptions = computed(() => {
+  return hierarchyCatalog.value
+    .map((item) => String(item?.building_name || '').trim())
+    .filter(Boolean)
+})
+
+const getFloorOptionsByBuilding = (buildingName) => {
+  const building = String(buildingName || '').trim()
+  if (!building) return []
+  const entry = hierarchyCatalog.value.find((item) => String(item?.building_name || '').trim() === building)
+  const floors = Array.isArray(entry?.floors) ? entry.floors : []
+  return floors.map((item) => String(item || '').trim()).filter(Boolean)
+}
+
+const floorOptions = computed(() => getFloorOptionsByBuilding(form.value.building_name))
 
 const fetchVenues = async () => {
   try {
@@ -77,6 +94,20 @@ const fetchUsers = async () => {
   } catch (e) { console.error(e) }
 }
 
+const fetchHierarchyCatalog = async () => {
+  if (!['sys_admin', 'venue_admin'].includes(role.value)) {
+    hierarchyCatalog.value = []
+    return
+  }
+  try {
+    const res = await api.get('/venues/catalog')
+    hierarchyCatalog.value = Array.isArray(res?.data?.buildings) ? res.data.buildings : []
+  } catch (e) {
+    console.error('获取楼栋目录失败', e)
+    hierarchyCatalog.value = []
+  }
+}
+
 const getAdminName = (adminId) => {
   if (!adminId) return '未分配'
   const admin = users.value.find(u => Number(u.id) === Number(adminId))
@@ -86,6 +117,7 @@ const getAdminName = (adminId) => {
 onMounted(() => {
   fetchVenues()
   fetchUsers()
+  fetchHierarchyCatalog()
 })
 
 watch(
@@ -107,6 +139,14 @@ watch(
 watch(keyword, (value) => {
     if (String(value || '').trim().length > 0) {
         showBuildingView.value = false
+    }
+})
+
+watch(() => form.value.building_name, (next, prev) => {
+    if (prev === undefined || next === prev) return
+    const floors = getFloorOptionsByBuilding(next)
+    if (!floors.includes(form.value.floor_label)) {
+        form.value.floor_label = ''
     }
 })
 
@@ -137,6 +177,110 @@ const openEdit = (venue) => {
         status: 'success',
     }))
     showModal.value = true
+}
+
+const showCreateBuildingModal = ref(false)
+const showCreateFloorModal = ref(false)
+const creatingBuilding = ref(false)
+const creatingFloor = ref(false)
+const createBuildingForm = ref({
+    building_name: '',
+    floors_text: '1层,2层,3层',
+    auto_create_managers: true,
+    manager_password: 'Admin@123456',
+})
+const createFloorForm = ref({
+    building_name: '',
+    floor_label: '',
+    auto_create_manager: false,
+    manager_password: 'Admin@123456',
+})
+
+const openCreateBuilding = () => {
+    createBuildingForm.value = {
+        building_name: '',
+        floors_text: '1层,2层,3层',
+        auto_create_managers: true,
+        manager_password: 'Admin@123456',
+    }
+    showCreateBuildingModal.value = true
+}
+
+const openCreateFloor = () => {
+    createFloorForm.value = {
+        building_name: form.value.building_name || selectedBuilding.value || '',
+        floor_label: '',
+        auto_create_manager: false,
+        manager_password: 'Admin@123456',
+    }
+    showCreateFloorModal.value = true
+}
+
+const submitCreateBuilding = async () => {
+    const buildingName = String(createBuildingForm.value.building_name || '').trim()
+    if (!buildingName) {
+        ElMessage.warning('请填写楼栋名称')
+        return
+    }
+    creatingBuilding.value = true
+    try {
+        const floors = String(createBuildingForm.value.floors_text || '')
+            .split(/[;,，\n]/)
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+        const res = await api.post('/venues/catalog/buildings', {
+            building_name: buildingName,
+            floors,
+            auto_create_managers: !!createBuildingForm.value.auto_create_managers,
+            manager_password: String(createBuildingForm.value.manager_password || '').trim(),
+        })
+        await fetchHierarchyCatalog()
+        form.value.building_name = buildingName
+        if (floors.length > 0) {
+            form.value.floor_label = floors[0]
+        }
+        showCreateBuildingModal.value = false
+        const managerCount = Number(res?.data?.created_managers?.length || 0)
+        const managerHint = managerCount > 0 ? `，自动创建管理员 ${managerCount} 人` : ''
+        ElMessage.success(`基础楼栋创建成功${managerHint}`)
+    } catch (e) {
+        ElMessage.error(e?.response?.data?.message || '创建楼栋失败')
+    } finally {
+        creatingBuilding.value = false
+    }
+}
+
+const submitCreateFloor = async () => {
+    const buildingName = String(createFloorForm.value.building_name || '').trim()
+    const floorLabel = String(createFloorForm.value.floor_label || '').trim()
+    if (!buildingName) {
+        ElMessage.warning('请选择楼栋')
+        return
+    }
+    if (!floorLabel) {
+        ElMessage.warning('请填写楼层名称')
+        return
+    }
+    creatingFloor.value = true
+    try {
+        const res = await api.post('/venues/catalog/floors', {
+            building_name: buildingName,
+            floor_label: floorLabel,
+            auto_create_manager: !!createFloorForm.value.auto_create_manager,
+            manager_password: String(createFloorForm.value.manager_password || '').trim(),
+        })
+        await fetchHierarchyCatalog()
+        form.value.building_name = buildingName
+        form.value.floor_label = floorLabel
+        showCreateFloorModal.value = false
+        const managerName = res?.data?.created_manager?.username
+        const managerHint = managerName ? `，自动创建管理员：${managerName}` : ''
+        ElMessage.success(`楼层单元创建成功${managerHint}`)
+    } catch (e) {
+        ElMessage.error(e?.response?.data?.message || '创建楼层失败')
+    } finally {
+        creatingFloor.value = false
+    }
 }
 
 const MAX_PHOTO_SIZE_MB = 5
@@ -185,6 +329,24 @@ const submitForm = async () => {
         const capacity = Number(form.value.capacity)
         if (!Number.isFinite(capacity) || capacity < 1) {
             ElMessage.warning('容纳人数需为大于 0 的整数')
+            return
+        }
+        const buildingName = String(form.value.building_name || '').trim()
+        const floorLabel = String(form.value.floor_label || '').trim()
+        if (!buildingName) {
+            ElMessage.warning('请先选择基础楼栋（若无请先创建楼栋）')
+            return
+        }
+        if (!floorLabel) {
+            ElMessage.warning('请先选择楼层单元（若无请先创建楼层）')
+            return
+        }
+        if (!buildingOptions.value.includes(buildingName)) {
+            ElMessage.warning('楼栋不在目录中，请先通过“新增楼栋”创建')
+            return
+        }
+        if (!getFloorOptionsByBuilding(buildingName).includes(floorLabel)) {
+            ElMessage.warning('楼层不在目录中，请先通过“新增楼层”创建')
             return
         }
 
@@ -247,6 +409,7 @@ const submitForm = async () => {
         }
         showModal.value = false
         fetchVenues()
+        fetchHierarchyCatalog()
     } catch (e) {
         ElMessage.error(isEdit.value ? "更新失败" : "创建失败")
         console.error(e)
@@ -432,7 +595,7 @@ const openBuildingDetail = (buildingName) => {
 <template>
   <div class="app-page app-stack">
     <div class="admin-toolbar venue-admin-toolbar">
-      <div class="admin-toolbar__filters">
+      <div class="admin-toolbar__filters venue-admin-toolbar__search">
         <el-input
           v-model="keyword"
           clearable
@@ -445,9 +608,13 @@ const openBuildingDetail = (buildingName) => {
           <el-option label="维护中" value="maintenance" />
         </el-select>
       </div>
-      <div class="admin-toolbar__filters">
+      <div class="admin-toolbar__filters venue-admin-toolbar__actions">
         <span class="admin-toolbar__meta">共 {{ filteredVenues.length }} 个场馆</span>
-        <el-button v-if="isSysAdmin" type="primary" @click="openCreate">新增场馆</el-button>
+        <div v-if="isSysAdmin" class="venue-admin-toolbar__action-group">
+          <el-button plain @click="openCreateBuilding">新增楼栋</el-button>
+          <el-button plain @click="openCreateFloor">新增楼层</el-button>
+          <el-button type="primary" @click="openCreate">新增场馆</el-button>
+        </div>
       </div>
     </div>
 
@@ -599,14 +766,14 @@ const openBuildingDetail = (buildingName) => {
 
     <!-- Create/Edit Modal -->
     <el-dialog v-model="showModal" :title="isEdit ? '编辑场馆' : '新增场馆'" width="650px" class="glass-dialog venue-edit-dialog" align-center append-to-body>
-        <el-form :model="form" label-width="100px">
+        <el-form :model="form" label-width="100px" class="venue-edit-form">
             <el-row :gutter="20">
-              <el-col :span="12">
+              <el-col :xs="24" :sm="12">
                 <el-form-item label="场馆名称">
                     <el-input v-model="form.name" placeholder="例如：由这里大讲堂" />
                 </el-form-item>
               </el-col>
-              <el-col :span="12">
+              <el-col :xs="24" :sm="12">
                 <el-form-item label="场馆类型">
                     <el-select v-model="form.type" style="width: 100%">
                         <el-option label="教室" value="Classroom" />
@@ -618,25 +785,37 @@ const openBuildingDetail = (buildingName) => {
             </el-row>
 
             <el-row :gutter="20">
-              <el-col :span="12">
+              <el-col :xs="24" :sm="12">
                 <el-form-item label="容纳人数">
                     <el-input-number v-model="form.capacity" :min="1" style="width: 100%" />
                 </el-form-item>
               </el-col>
-              <el-col :span="12">
+              <el-col :xs="24" :sm="12">
                 <el-form-item label="楼栋">
-                    <el-input v-model="form.building_name" placeholder="例如：A栋" />
+                    <el-select v-model="form.building_name" placeholder="请先选择楼栋" filterable style="width: 100%">
+                        <el-option v-for="name in buildingOptions" :key="name" :label="name" :value="name" />
+                    </el-select>
+                    <div class="tip-line" v-if="isSysAdmin">
+                        没有目标楼栋？
+                        <el-button link type="primary" @click="openCreateBuilding">先创建基础楼栋</el-button>
+                    </div>
                 </el-form-item>
               </el-col>
             </el-row>
 
             <el-row :gutter="20">
-              <el-col :span="12">
+              <el-col :xs="24" :sm="12">
                 <el-form-item label="楼层">
-                    <el-input v-model="form.floor_label" placeholder="例如：3层 / B1层" />
+                    <el-select v-model="form.floor_label" placeholder="请先选择楼层" filterable style="width: 100%" :disabled="!form.building_name">
+                        <el-option v-for="name in floorOptions" :key="name" :label="name" :value="name" />
+                    </el-select>
+                    <div class="tip-line" v-if="isSysAdmin">
+                        没有目标楼层？
+                        <el-button link type="primary" @click="openCreateFloor" :disabled="!form.building_name">先创建楼层单元</el-button>
+                    </div>
                 </el-form-item>
               </el-col>
-              <el-col :span="12">
+              <el-col :xs="24" :sm="12">
                 <el-form-item label="教室编码">
                     <el-input v-model="form.room_code" placeholder="例如：301 / A111" />
                 </el-form-item>
@@ -644,7 +823,7 @@ const openBuildingDetail = (buildingName) => {
             </el-row>
 
             <el-row :gutter="20">
-              <el-col :span="12">
+              <el-col :xs="24" :sm="12">
                 <el-form-item label="场地管理员">
                     <el-select v-model="form.admin_id" placeholder="选择管理员" clearable style="width: 100%">
                         <el-option 
@@ -656,7 +835,7 @@ const openBuildingDetail = (buildingName) => {
                     </el-select>
                 </el-form-item>
               </el-col>
-              <el-col :span="12">
+              <el-col :xs="24" :sm="12">
                 <el-form-item label="状态">
                     <el-select v-model="form.status" style="width: 100%">
                         <el-option label="可用" value="available" />
@@ -713,9 +892,54 @@ const openBuildingDetail = (buildingName) => {
         </template>
     </el-dialog>
 
+    <el-dialog v-model="showCreateBuildingModal" title="新增基础楼栋" width="520px" class="glass-dialog venue-sub-dialog" align-center append-to-body>
+        <el-form :model="createBuildingForm" label-width="110px" class="venue-sub-form">
+            <el-form-item label="楼栋名称">
+                <el-input v-model="createBuildingForm.building_name" placeholder="例如：智行楼" />
+            </el-form-item>
+            <el-form-item label="初始楼层">
+                <el-input v-model="createBuildingForm.floors_text" placeholder="例如：1层,2层,3层（可留空）" />
+            </el-form-item>
+            <el-form-item label="自动建管理员">
+                <el-switch v-model="createBuildingForm.auto_create_managers" />
+            </el-form-item>
+            <el-form-item label="初始密码" v-if="createBuildingForm.auto_create_managers">
+                <el-input v-model="createBuildingForm.manager_password" show-password placeholder="默认 Admin@123456" />
+            </el-form-item>
+            <div class="tip-line">说明：自动创建的是 `venue_admin` 账号，不再创建 `floor_admin`。</div>
+        </el-form>
+        <template #footer>
+            <el-button @click="showCreateBuildingModal = false">取消</el-button>
+            <el-button type="primary" :loading="creatingBuilding" @click="submitCreateBuilding">创建楼栋</el-button>
+        </template>
+    </el-dialog>
+
+    <el-dialog v-model="showCreateFloorModal" title="新增楼层单元" width="520px" class="glass-dialog venue-sub-dialog" align-center append-to-body>
+        <el-form :model="createFloorForm" label-width="110px" class="venue-sub-form">
+            <el-form-item label="所属楼栋">
+                <el-select v-model="createFloorForm.building_name" placeholder="请选择楼栋" filterable style="width: 100%">
+                    <el-option v-for="name in buildingOptions" :key="name" :label="name" :value="name" />
+                </el-select>
+            </el-form-item>
+            <el-form-item label="楼层名称">
+                <el-input v-model="createFloorForm.floor_label" placeholder="例如：4层 / B1层" />
+            </el-form-item>
+            <el-form-item label="自动建管理员">
+                <el-switch v-model="createFloorForm.auto_create_manager" />
+            </el-form-item>
+            <el-form-item label="初始密码" v-if="createFloorForm.auto_create_manager">
+                <el-input v-model="createFloorForm.manager_password" show-password placeholder="默认 Admin@123456" />
+            </el-form-item>
+        </el-form>
+        <template #footer>
+            <el-button @click="showCreateFloorModal = false">取消</el-button>
+            <el-button type="primary" :loading="creatingFloor" @click="submitCreateFloor">创建楼层</el-button>
+        </template>
+    </el-dialog>
+
     <!-- Maintenance Schedule Modal -->
-    <el-dialog v-model="showMaintenanceModal" title="预约维护时段" width="500px" class="glass-dialog" align-center append-to-body>
-        <el-form :model="maintenanceForm" label-width="80px">
+    <el-dialog v-model="showMaintenanceModal" title="预约维护时段" width="500px" class="glass-dialog venue-sub-dialog" align-center append-to-body>
+        <el-form :model="maintenanceForm" label-width="80px" class="venue-sub-form">
             <el-form-item label="原因">
                 <el-input v-model="maintenanceForm.reason" placeholder="例如：设备检修" />
             </el-form-item>
@@ -747,8 +971,34 @@ const openBuildingDetail = (buildingName) => {
     --toolbar-field-width: 170px;
 }
 
+.venue-admin-toolbar__search {
+    flex: 1 1 420px;
+}
+
+.venue-admin-toolbar__actions {
+    margin-left: auto;
+    justify-content: flex-end;
+}
+
+.venue-admin-toolbar__action-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .toolbar-field--wide {
     --toolbar-field-width: 240px;
+}
+
+.tip-line {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #8a91a5;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
 }
 
 .panel-header {
@@ -941,6 +1191,97 @@ html.dark .meta-pill {
 }
 
 @media (max-width: 768px) {
+    .venue-admin-toolbar {
+        gap: 10px;
+    }
+
+    .venue-admin-toolbar__search {
+        flex: 1 1 100%;
+    }
+
+    .venue-admin-toolbar__actions {
+        width: 100%;
+        margin-left: 0;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .venue-admin-toolbar__actions .admin-toolbar__meta {
+        width: 100%;
+    }
+
+    .venue-admin-toolbar__action-group {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .venue-admin-toolbar__action-group .el-button {
+        width: 100%;
+        margin: 0 !important;
+    }
+
+    .venue-admin-toolbar__action-group .el-button--primary {
+        grid-column: 1 / -1;
+    }
+
+    .venue-edit-dialog :deep(.el-dialog),
+    .venue-sub-dialog :deep(.el-dialog) {
+        width: calc(100vw - 20px) !important;
+        max-width: calc(100vw - 20px) !important;
+    }
+
+    .venue-edit-dialog :deep(.el-dialog__body),
+    .venue-sub-dialog :deep(.el-dialog__body) {
+        padding: 8px 12px !important;
+    }
+
+    .venue-edit-dialog :deep(.el-row) {
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+    }
+
+    .venue-edit-dialog :deep(.el-col) {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+
+    .venue-edit-dialog :deep(.el-form-item__label),
+    .venue-sub-dialog :deep(.el-form-item__label) {
+        width: 100% !important;
+        justify-content: flex-start;
+        text-align: left;
+        padding: 0 0 4px 0 !important;
+        line-height: 1.25;
+    }
+
+    .venue-edit-dialog :deep(.el-form-item__content),
+    .venue-sub-dialog :deep(.el-form-item__content) {
+        margin-left: 0 !important;
+        width: 100%;
+    }
+
+    .venue-edit-dialog :deep(.el-upload--picture-card),
+    .venue-edit-dialog :deep(.el-upload-list--picture-card .el-upload-list__item) {
+        width: 72px;
+        height: 72px;
+    }
+
+    .venue-edit-dialog :deep(.el-dialog__footer),
+    .venue-sub-dialog :deep(.el-dialog__footer) {
+        display: flex;
+        flex-direction: column-reverse;
+        gap: 8px;
+    }
+
+    .venue-edit-dialog :deep(.el-dialog__footer .el-button),
+    .venue-sub-dialog :deep(.el-dialog__footer .el-button) {
+        width: 100%;
+        margin: 0 !important;
+    }
+
     .building-grid,
     .venue-grid {
         grid-template-columns: 1fr;
@@ -961,6 +1302,22 @@ html.dark .meta-pill {
         height: 28px;
         padding: 0 10px;
         font-size: 11px;
+    }
+}
+
+@media (max-width: 420px) {
+    .venue-admin-toolbar__action-group {
+        grid-template-columns: 1fr;
+    }
+
+    .venue-admin-toolbar__action-group .el-button--primary {
+        grid-column: auto;
+    }
+
+    .venue-edit-dialog :deep(.el-upload--picture-card),
+    .venue-edit-dialog :deep(.el-upload-list--picture-card .el-upload-list__item) {
+        width: 64px;
+        height: 64px;
     }
 }
 

@@ -7,11 +7,13 @@ import { Reservation } from '../reservations/entities/reservation.entity';
 import { Notification } from '../notifications/entities/notification.entity';
 import { LlmModule } from '../llm/llm.module';
 import { ReservationSlot } from '../reservations/entities/reservation-slot.entity';
+import { UsersModule } from '../users/users.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([Venue, Reservation, Notification, ReservationSlot]),
         LlmModule,
+        UsersModule,
     ],
     controllers: [VenuesController],
     providers: [VenuesService],

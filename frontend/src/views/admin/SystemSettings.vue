@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, reactive, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, reactive, watch, computed } from 'vue'
 import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
@@ -9,13 +9,28 @@ const llmStatus = ref('loading')
 const importLoading = ref(false)
 const importDryRun = ref(true)
 const importReplaceClassrooms = ref(false)
+const importPruneMissingUsers = ref(true)
+const importPruneMissingVenues = ref(true)
+const exportUsersLoading = ref(false)
+const exportVenuesLoading = ref(false)
 const usersImportFile = ref(null)
 const venuesImportFile = ref(null)
 const importResult = ref(null)
+const importJobId = ref('')
+const importProgress = reactive({
+    status: 'idle',
+    percent: 0,
+    phase: 'idle',
+    message: '',
+})
 const configLoaded = ref(false)
 const llmApiKeyConfigured = ref(false)
 const llmSection = ref('connection')
 const expandedPromptPanels = ref(['llm_system_prompt'])
+const IMPORT_START_TIMEOUT_MS = 2 * 60 * 1000
+const IMPORT_PROGRESS_POLL_MS = 1200
+const EXPORT_REQUEST_TIMEOUT_MS = 2 * 60 * 1000
+let importProgressTimer = null
 
 const FRONTEND_PROMPT_DEFAULTS = {
     llm_system_prompt: `你是高校场地预约系统的 AI 助手。请遵守以下要求：
@@ -348,14 +363,162 @@ const handleVenuesFileSelect = (event) => {
     venuesImportFile.value = file
 }
 
+const parseDownloadFilename = (contentDisposition, fallbackName) => {
+    const fallback = String(fallbackName || 'download.csv')
+    const header = String(contentDisposition || '')
+    const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)
+    if (utf8Match && utf8Match[1]) {
+        try {
+            return decodeURIComponent(utf8Match[1].trim())
+        } catch (e) {
+            // ignore decode failure and fallback to plain filename
+        }
+    }
+    const plainMatch = header.match(/filename="?([^";]+)"?/i)
+    if (plainMatch && plainMatch[1]) {
+        return plainMatch[1].trim()
+    }
+    return fallback
+}
+
+const triggerCsvDownload = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    window.URL.revokeObjectURL(url)
+}
+
+const parseBlobPayloadMessage = async (payload) => {
+    if (!(payload instanceof Blob)) return ''
+    try {
+        const text = String(await payload.text() || '').trim()
+        if (!text) return ''
+        try {
+            const obj = JSON.parse(text)
+            const message = obj?.message
+            if (Array.isArray(message)) return message.join('；')
+            if (typeof message === 'string' && message.trim()) return message
+            if (typeof obj?.detail === 'string' && obj.detail.trim()) return obj.detail
+        } catch (e) {
+            return text
+        }
+    } catch (e) {
+        return ''
+    }
+    return ''
+}
+
+const normalizeExportError = async (error) => {
+    const blobMessage = await parseBlobPayloadMessage(error?.response?.data)
+    if (blobMessage) return blobMessage
+    const message = error?.response?.data?.message
+    if (Array.isArray(message)) return message.join('；')
+    if (typeof message === 'string' && message.trim()) return message
+    return error?.message || '导出失败'
+}
+
+const exportStructuredCsv = async (kind) => {
+    const isUsers = kind === 'users'
+    const loadingRef = isUsers ? exportUsersLoading : exportVenuesLoading
+    if (loadingRef.value) return
+    loadingRef.value = true
+    try {
+        const res = await api.get(`/system-config/export/structured/${kind}`, {
+            responseType: 'blob',
+            timeout: EXPORT_REQUEST_TIMEOUT_MS,
+        })
+        const blob = res?.data instanceof Blob
+            ? res.data
+            : new Blob([String(res?.data || '')], { type: 'text/csv;charset=utf-8' })
+        const contentDisposition = res?.headers?.['content-disposition'] || res?.headers?.['Content-Disposition']
+        const fallbackName = `${kind}.csv`
+        const filename = parseDownloadFilename(contentDisposition, fallbackName)
+        triggerCsvDownload(blob, filename)
+        const rows = Number(res?.headers?.['x-structured-export-rows'] || 0)
+        const rowsSuffix = rows > 0 ? `，共 ${rows} 行` : ''
+        ElMessage.success(`${fallbackName} 导出成功${rowsSuffix}`)
+    } catch (error) {
+        const detail = await normalizeExportError(error)
+        ElMessage.error(detail)
+    } finally {
+        loadingRef.value = false
+    }
+}
+
+const stopImportPolling = () => {
+    if (importProgressTimer) {
+        clearTimeout(importProgressTimer)
+        importProgressTimer = null
+    }
+}
+
+const resetImportProgress = () => {
+    importProgress.status = 'idle'
+    importProgress.percent = 0
+    importProgress.phase = 'idle'
+    importProgress.message = ''
+}
+
+const updateImportProgress = (payload = {}) => {
+    importProgress.status = String(payload.status || importProgress.status || 'running')
+    importProgress.phase = String(payload.phase || importProgress.phase || 'running')
+    importProgress.percent = Math.max(
+        Number(importProgress.percent || 0),
+        Math.min(100, Number(payload.progress_percent ?? payload.percent ?? 0)),
+    )
+    importProgress.message = String(payload.message || importProgress.message || '')
+}
+
+const pollStructuredImportProgress = async (jobId) => {
+    if (!jobId || !importLoading.value) return
+    try {
+        const res = await api.get(`/system-config/import/structured/progress/${encodeURIComponent(jobId)}`, {
+            timeout: 30000,
+        })
+        const data = res?.data || {}
+        updateImportProgress(data)
+
+        if (data.status === 'completed' || data.status === 'failed') {
+            importLoading.value = false
+            stopImportPolling()
+            const finalResult = data.result || {
+                ok: data.status === 'completed',
+                message: data.message || (data.status === 'completed' ? '导入完成' : '导入失败'),
+            }
+            importResult.value = finalResult
+            if (finalResult.ok === false) {
+                ElMessage.error(finalResult.message || '导入失败')
+            } else {
+                ElMessage.success(finalResult.message || '导入完成')
+            }
+            return
+        }
+    } catch (error) {
+        const detail = normalizeImportError(error)
+        importProgress.message = detail
+    }
+
+    stopImportPolling()
+    importProgressTimer = setTimeout(() => {
+        void pollStructuredImportProgress(jobId)
+    }, IMPORT_PROGRESS_POLL_MS)
+}
+
 const submitStructuredImport = async () => {
     if (!usersImportFile.value && !venuesImportFile.value) {
         ElMessage.error('请至少选择 users.csv 或 venues.csv')
         return
     }
 
+    stopImportPolling()
     importLoading.value = true
     importResult.value = null
+    importJobId.value = ''
+    resetImportProgress()
     try {
         const formData = new FormData()
         if (usersImportFile.value) {
@@ -366,22 +529,39 @@ const submitStructuredImport = async () => {
         }
         formData.append('dry_run', String(importDryRun.value))
         formData.append('replace_classrooms', String(importReplaceClassrooms.value))
+        formData.append('prune_missing_users', String(importPruneMissingUsers.value))
+        formData.append('prune_missing_venues', String(importPruneMissingVenues.value))
 
-        const res = await api.post('/system-config/import/structured', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
+        const res = await api.post('/system-config/import/structured/start', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: IMPORT_START_TIMEOUT_MS,
         })
-        importResult.value = res.data
-        ElMessage.success(res.data?.message || '导入完成')
+        importJobId.value = String(res?.data?.job_id || '')
+        updateImportProgress({
+            status: 'running',
+            phase: 'queued',
+            percent: 1,
+            message: res?.data?.message || '导入任务已启动',
+        })
+        if (!importJobId.value) {
+            throw new Error('导入任务启动失败：未返回 job_id')
+        }
+        void pollStructuredImportProgress(importJobId.value)
     } catch (e) {
         const detail = normalizeImportError(e)
         importResult.value = { ok: false, message: detail }
         ElMessage.error(detail)
-    } finally {
         importLoading.value = false
     }
 }
 
 const normalizeImportError = (error) => {
+    const isTimeout = error?.code === 'ECONNABORTED'
+        || String(error?.message || '').toLowerCase().includes('timeout')
+    if (isTimeout) {
+        return '导入请求超时，请稍后重试或改为命令行导入'
+    }
+
     const payload = error?.response?.data
     const message = payload?.message
     if (Array.isArray(message)) {
@@ -399,6 +579,10 @@ const normalizeImportError = (error) => {
 onMounted(() => {
     fetchConfig()
     checkLlmStatus()
+})
+
+onUnmounted(() => {
+    stopImportPolling()
 })
 </script>
 
@@ -522,9 +706,32 @@ onMounted(() => {
         <el-card class="box-card app-panel" shadow="never">
             <template #header>
                 <div class="card-header">
-                    <span>结构化数据导入（用户 / 场馆）</span>
+                    <span>结构化数据导入 / 导出（用户 / 场馆）</span>
                 </div>
             </template>
+
+            <div class="export-actions">
+                <el-button
+                    type="success"
+                    plain
+                    :disabled="importLoading"
+                    :loading="exportUsersLoading"
+                    @click="exportStructuredCsv('users')"
+                >
+                    导出 users.csv
+                </el-button>
+                <el-button
+                    type="success"
+                    plain
+                    :disabled="importLoading"
+                    :loading="exportVenuesLoading"
+                    @click="exportStructuredCsv('venues')"
+                >
+                    导出 venues.csv
+                </el-button>
+            </div>
+            <div class="tip">导出 CSV 与导入表头保持一致；`sys_admin/admin` 不参与导入导出。</div>
+            <el-divider />
 
             <el-form label-position="top">
                 <el-form-item label="用户 CSV（users.csv）">
@@ -546,15 +753,35 @@ onMounted(() => {
                 </el-form-item>
 
                 <el-form-item>
+                    <el-checkbox v-model="importPruneMissingUsers">同步清理 users.csv 中不存在的历史用户</el-checkbox>
+                </el-form-item>
+
+                <el-form-item>
+                    <el-checkbox v-model="importPruneMissingVenues">同步清理 venues.csv 中不存在的历史场馆</el-checkbox>
+                </el-form-item>
+
+                <el-form-item>
                     <el-button type="primary" :loading="importLoading" @click="submitStructuredImport">执行导入</el-button>
                 </el-form-item>
             </el-form>
+
+            <div v-if="importLoading || importProgress.percent > 0" class="import-progress">
+                <el-progress
+                    :percentage="importProgress.percent"
+                    :status="importProgress.status === 'failed' ? 'exception' : (importProgress.status === 'completed' ? 'success' : '')"
+                    :stroke-width="14"
+                />
+                <div class="tip">{{ importProgress.message || '导入执行中...' }}</div>
+                <div v-if="importJobId" class="tip">job: {{ importJobId }}</div>
+            </div>
 
             <div v-if="importResult" class="import-result" :class="{ 'is-error': importResult.ok === false }">
                 <div class="import-title">{{ importResult.message }}</div>
                 <div v-if="importResult.dbPath" class="tip">DB: {{ importResult.dbPath }}</div>
                 <div v-if="importResult.users" class="tip">users: 新增 {{ importResult.users.created }}，更新 {{ importResult.users.updated }}</div>
+                <div v-if="importResult.users && importResult.users.deleted !== undefined" class="tip">users deleted: {{ importResult.users.deleted }}（blocked: {{ importResult.users.blocked || 0 }}）</div>
                 <div v-if="importResult.venues" class="tip">venues: 新增 {{ importResult.venues.created }}，更新 {{ importResult.venues.updated }}</div>
+                <div v-if="importResult.venues && importResult.venues.deleted !== undefined" class="tip">venues deleted: {{ importResult.venues.deleted }}</div>
                 <div v-if="importResult.classroomsDeleted !== undefined" class="tip">classrooms deleted: {{ importResult.classroomsDeleted }}</div>
             </div>
         </el-card>
@@ -574,6 +801,13 @@ onMounted(() => {
     font-size: 12px;
     color: #909399;
     margin-top: 4px;
+}
+
+.export-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
 }
 
 .llm-config-shell {
@@ -785,9 +1019,22 @@ html.dark .prompt-fixed-block {
     border: 1px solid rgba(103, 194, 58, 0.35);
 }
 
+.import-progress {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(64, 158, 255, 0.3);
+    background: rgba(64, 158, 255, 0.08);
+}
+
 .import-result.is-error {
     background: rgba(245, 108, 108, 0.12);
     border-color: rgba(245, 108, 108, 0.4);
+}
+
+html.dark .import-progress {
+    background: rgba(64, 158, 255, 0.16);
+    border-color: rgba(144, 191, 255, 0.45);
 }
 
 .import-title {

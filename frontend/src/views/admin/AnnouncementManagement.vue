@@ -12,6 +12,7 @@ const keyword = ref('')
 const showModal = ref(false)
 const isEdit = ref(false)
 const currentId = ref(null)
+const clearLoading = ref(false)
 
 const form = ref({
   title: '',
@@ -113,6 +114,27 @@ const handleDelete = async (row) => {
   }
 }
 
+const handleClearAll = async () => {
+  try {
+    await ElMessageBox.confirm('将从数据库中永久清空全部公告历史，且不可恢复。是否继续？', '高风险操作', {
+      confirmButtonText: '确认清空',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    clearLoading.value = true
+    const res = await api.delete('/announcements/history/all')
+    const deleted = Number(res?.data?.deleted || 0)
+    ElMessage.success(`公告历史已清空（${deleted} 条）`)
+    await fetchAnnouncements()
+  } catch (e) {
+    if (!isUserDismiss(e)) {
+      ElMessage.error('清空失败')
+    }
+  } finally {
+    clearLoading.value = false
+  }
+}
+
 
 const filteredAnnouncements = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
@@ -140,6 +162,7 @@ const filteredAnnouncements = computed(() => {
       </div>
       <div class="admin-toolbar__filters">
         <span class="admin-toolbar__meta">共 {{ filteredAnnouncements.length }} / {{ announcements.length }} 条公告</span>
+        <el-button type="danger" plain :loading="clearLoading" :disabled="announcements.length === 0" @click="handleClearAll">一键清空历史</el-button>
         <el-button type="primary" @click="openCreate">发布公告</el-button>
       </div>
     </div>

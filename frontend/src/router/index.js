@@ -115,26 +115,26 @@ const router = createRouter({
                     path: 'announcements',
                     name: 'announcements',
                     component: Announcements,
-                    meta: { roles: ['student_teacher', 'venue_admin', 'floor_admin', 'sys_admin'] }
+                    meta: { roles: ['student_teacher', 'venue_admin', 'sys_admin'] }
                 },
                 // Admin Routes
                 {
                     path: 'admin/dashboard',
                     name: 'admin-dashboard',
                     component: AdminDashboard,
-                    meta: { roles: ['venue_admin', 'floor_admin', 'sys_admin'] }
+                    meta: { roles: ['venue_admin', 'sys_admin'] }
                 },
                 {
                     path: 'admin/venues',
                     name: 'admin-venues',
                     component: VenueManagement,
-                    meta: { roles: ['venue_admin', 'floor_admin', 'sys_admin'] }
+                    meta: { roles: ['venue_admin', 'sys_admin'] }
                 },
                 {
                     path: 'admin/audit',
                     name: 'admin-audit',
                     component: AdminAudit,
-                    meta: { roles: ['venue_admin', 'floor_admin', 'sys_admin'] }
+                    meta: { roles: ['venue_admin', 'sys_admin'] }
                 },
                 {
                     path: 'admin/users',
@@ -193,7 +193,7 @@ router.beforeEach(async (to, from, next) => {
         return
     }
 
-    if ((to.path === '/admin/venues' || to.path === '/admin/audit') && ['venue_admin', 'floor_admin'].includes(role) && !hasManagedScope) {
+    if ((to.path === '/admin/venues' || to.path === '/admin/audit') && role === 'venue_admin' && !hasManagedScope) {
         next('/admin/dashboard')
         return
     }

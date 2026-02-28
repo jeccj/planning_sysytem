@@ -10,10 +10,9 @@ import { formatTime, getNoticePreview, getStatusLabel, getVenueBuildingName, isU
 const router = useRouter()
 const authStore = useAuthStore()
 const isSysAdmin = computed(() => authStore.user?.role === 'sys_admin')
-const isFloorAdmin = computed(() => authStore.user?.role === 'floor_admin')
 const canAccessVenueTab = computed(() => {
   if (authStore.user?.role === 'sys_admin') return true
-  if (!['venue_admin', 'floor_admin'].includes(authStore.user?.role || '')) return false
+  if (authStore.user?.role !== 'venue_admin') return false
   const managedBuilding = (authStore.user?.managed_building || authStore.user?.managedBuilding || '').toString().trim()
   const managedFloor = (authStore.user?.managed_floor || authStore.user?.managedFloor || '').toString().trim()
   return !!managedBuilding || !!managedFloor
@@ -23,6 +22,15 @@ const statsRowClass = computed(() => ({
 }))
 
 const classroomTypeSet = new Set(['Classroom', '教室'])
+const venueTypeLabelMap = Object.freeze({
+  Classroom: '教室',
+  教室: '教室',
+  Lab: '实验室',
+  实验室: '实验室',
+  Hall: '礼堂',
+  礼堂: '礼堂',
+})
+const breakdownColorPool = Object.freeze(['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#909399', '#13c2c2'])
 const buildingFallbackNotified = ref(false)
 
 const createEmptyBuildingAvailability = () => ({
@@ -60,14 +68,6 @@ const applyVenueScope = (venues) => {
     if (!managedBuilding && !managedFloor) {
       return []
     }
-    return list.filter((item) => {
-      const inBuilding = !managedBuilding || getVenueBuildingName(item) === managedBuilding
-      const inFloor = !managedFloor || getVenueFloorLabel(item) === managedFloor
-      return inBuilding && inFloor
-    })
-  }
-
-  if (role === 'floor_admin') {
     return list.filter((item) => {
       const inBuilding = !managedBuilding || getVenueBuildingName(item) === managedBuilding
       const inFloor = !managedFloor || getVenueFloorLabel(item) === managedFloor
@@ -175,18 +175,37 @@ const stats = ref({
   totalVenues: 0,
   totalUsers: 0,
   pendingReservations: 0,
-  // Structure: { type: { total: 0, available: 0 } }
-  venuesByType: { 
-      '教室': { total: 0, available: 0 }, 
-      '实验室': { total: 0, available: 0 }, 
-      '礼堂': { total: 0, available: 0 } 
-  },
+  // Structure: { [venueType]: { total: number, available: number } }
+  venuesByType: {},
   recentReservations: []
+})
+
+const venueTypeBreakdown = computed(() => {
+  const entries = Object.entries(stats.value.venuesByType || {})
+    .map(([type, row], index) => {
+      const total = Number(row?.total || 0)
+      const available = Number(row?.available || 0)
+      const percent = total > 0 ? Math.round((available / total) * 100) : 0
+      return {
+        type,
+        label: venueTypeLabelMap[type] || type || '未分类',
+        total,
+        available,
+        percent,
+        color: breakdownColorPool[index % breakdownColorPool.length],
+      }
+    })
+    .sort((a, b) => {
+      if (b.total !== a.total) return b.total - a.total
+      return a.label.localeCompare(b.label, 'zh-CN')
+    })
+  return entries
 })
 
 const loading = ref(true)
 const latestAnnouncement = ref(null)
 const buildingLoading = ref(false)
+const quickExportLoading = ref(false)
 const selectedBuilding = ref('')
 const buildingAvailability = ref(createEmptyBuildingAvailability())
 
@@ -205,25 +224,16 @@ const fetchDashboardData = async () => {
 
      stats.value.totalVenues = venues.length
      
-     const nextByType = {
-        '教室': { total: 0, available: 0 }, 
-        '实验室': { total: 0, available: 0 }, 
-        '礼堂': { total: 0, available: 0 } 
-     }
-
-     const typeMap = {
-         'Classroom': '教室',
-         'Lab': '实验室',
-         'Hall': '礼堂'
-     }
+     const nextByType = {}
 
      venues.forEach(v => {
-         const displayType = typeMap[v.type] || v.type
-         if (nextByType[displayType]) {
-             nextByType[displayType].total++
-             if (v.status === 'available') {
-                nextByType[displayType].available++
-             }
+         const typeKey = String(v?.type || '').trim() || '未分类'
+         if (!nextByType[typeKey]) {
+            nextByType[typeKey] = { total: 0, available: 0 }
+         }
+         nextByType[typeKey].total++
+         if (v.status === 'available') {
+            nextByType[typeKey].available++
          }
      })
      stats.value.venuesByType = nextByType
@@ -311,6 +321,107 @@ const fetchLatestAnnouncement = async () => {
     }
 }
 
+const parseDownloadFilename = (contentDisposition, fallbackName) => {
+  const fallback = String(fallbackName || 'download.csv')
+  const header = String(contentDisposition || '')
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match && utf8Match[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim())
+    } catch (e) {
+      // ignore decode failure and fallback to plain filename
+    }
+  }
+  const plainMatch = header.match(/filename="?([^";]+)"?/i)
+  if (plainMatch && plainMatch[1]) {
+    return plainMatch[1].trim()
+  }
+  return fallback
+}
+
+const triggerCsvDownload = (blob, filename) => {
+  const url = window.URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.URL.revokeObjectURL(url)
+}
+
+const parseBlobPayloadMessage = async (payload) => {
+  if (!(payload instanceof Blob)) return ''
+  try {
+    const text = String(await payload.text() || '').trim()
+    if (!text) return ''
+    try {
+      const obj = JSON.parse(text)
+      const message = obj?.message
+      if (Array.isArray(message)) return message.join('；')
+      if (typeof message === 'string' && message.trim()) return message
+      if (typeof obj?.detail === 'string' && obj.detail.trim()) return obj.detail
+    } catch (e) {
+      return text
+    }
+  } catch (e) {
+    return ''
+  }
+  return ''
+}
+
+const exportStructuredFromDashboard = async () => {
+  if (!isSysAdmin.value) {
+    ElMessage.warning('仅系统管理员可导出数据')
+    return
+  }
+  if (quickExportLoading.value) return
+
+  quickExportLoading.value = true
+  try {
+    const [usersRes, venuesRes] = await Promise.all([
+      api.get('/system-config/export/structured/users', {
+        responseType: 'blob',
+        timeout: 2 * 60 * 1000,
+      }),
+      api.get('/system-config/export/structured/venues', {
+        responseType: 'blob',
+        timeout: 2 * 60 * 1000,
+      }),
+    ])
+
+    const usersBlob = usersRes?.data instanceof Blob
+      ? usersRes.data
+      : new Blob([String(usersRes?.data || '')], { type: 'text/csv;charset=utf-8' })
+    const usersName = parseDownloadFilename(
+      usersRes?.headers?.['content-disposition'] || usersRes?.headers?.['Content-Disposition'],
+      'users.csv',
+    )
+    triggerCsvDownload(usersBlob, usersName)
+
+    const venuesBlob = venuesRes?.data instanceof Blob
+      ? venuesRes.data
+      : new Blob([String(venuesRes?.data || '')], { type: 'text/csv;charset=utf-8' })
+    const venuesName = parseDownloadFilename(
+      venuesRes?.headers?.['content-disposition'] || venuesRes?.headers?.['Content-Disposition'],
+      'venues.csv',
+    )
+    triggerCsvDownload(venuesBlob, venuesName)
+
+    ElMessage.success('数据导出完成（users.csv + venues.csv）')
+  } catch (e) {
+    const blobMessage = await parseBlobPayloadMessage(e?.response?.data)
+    if (blobMessage) {
+      ElMessage.error(blobMessage)
+      return
+    }
+    const message = e?.response?.data?.message || e?.message || '数据导出失败'
+    ElMessage.error(Array.isArray(message) ? message.join('；') : String(message))
+  } finally {
+    quickExportLoading.value = false
+  }
+}
+
 
 
 const goToAnnouncements = () => {
@@ -352,38 +463,21 @@ const goToAnnouncements = () => {
     <div class="dashboard-grid">
         <!-- Left Col: Venue Breakdown & Quick Actions -->
         <div class="left-col">
-            <el-card v-if="isSysAdmin" class="glass-panel" shadow="never">
+            <el-card class="glass-panel" shadow="never">
                 <template #header>
                     <div class="panel-header">
                         <span><el-icon><DataAnalysis /></el-icon> 资源概况 (空闲/总数)</span>
                     </div>
                 </template>
                 <div class="breakdown-list">
-                    <div class="breakdown-item">
+                    <el-empty v-if="venueTypeBreakdown.length === 0" description="暂无场馆资源" :image-size="56" />
+                    <div v-for="item in venueTypeBreakdown" :key="item.type" class="breakdown-item">
                         <div class="bd-header">
-                            <span>普通教室</span>
-                            <span class="bd-val">{{ stats.venuesByType['教室'].available }} / {{ stats.venuesByType['教室'].total }}</span>
+                            <span>{{ item.label }}</span>
+                            <span class="bd-val">{{ item.available }} / {{ item.total }}</span>
                         </div>
-                        <el-progress :percentage="stats.venuesByType['教室'].total ? (stats.venuesByType['教室'].available / stats.venuesByType['教室'].total * 100) : 0" :stroke-width="10" color="#409eff">
-                            <template #default><span>{{ Math.round((stats.venuesByType['教室'].available / stats.venuesByType['教室'].total * 100) || 0) }}%</span></template>
-                        </el-progress>
-                    </div>
-                    <div class="breakdown-item">
-                        <div class="bd-header">
-                             <span>实验室</span>
-                             <span class="bd-val">{{ stats.venuesByType['实验室'].available }} / {{ stats.venuesByType['实验室'].total }}</span>
-                        </div>
-                        <el-progress :percentage="stats.venuesByType['实验室'].total ? (stats.venuesByType['实验室'].available / stats.venuesByType['实验室'].total * 100) : 0" :stroke-width="10" color="#67c23a">
-                             <template #default><span>{{ Math.round((stats.venuesByType['实验室'].available / stats.venuesByType['实验室'].total * 100) || 0) }}%</span></template>
-                        </el-progress>
-                    </div>
-                     <div class="breakdown-item">
-                        <div class="bd-header">
-                            <span>礼堂/展厅</span>
-                            <span class="bd-val">{{ stats.venuesByType['礼堂'].available }} / {{ stats.venuesByType['礼堂'].total }}</span>
-                        </div>
-                        <el-progress :percentage="stats.venuesByType['礼堂'].total ? (stats.venuesByType['礼堂'].available / stats.venuesByType['礼堂'].total * 100) : 0" :stroke-width="10" color="#e6a23c">
-                            <template #default><span>{{ Math.round((stats.venuesByType['礼堂'].available / stats.venuesByType['礼堂'].total * 100) || 0) }}%</span></template>
+                        <el-progress :percentage="item.percent" :stroke-width="10" :color="item.color">
+                            <template #default><span>{{ item.percent }}%</span></template>
                         </el-progress>
                     </div>
                 </div>
@@ -436,15 +530,15 @@ const goToAnnouncements = () => {
                 </div>
             </el-card>
 
-             <div v-if="!isFloorAdmin" class="quick-actions glass-panel">
+             <div class="quick-actions glass-panel">
                 <div class="action-btn" @click="$router.push('/admin/audit')">
                     审核中心
                 </div>
                 <div v-if="canAccessVenueTab" class="action-btn" @click="$router.push('/admin/venues')">
                     场馆管理
                 </div>
-                 <div class="action-btn disabled">
-                    数据导出
+                 <div class="action-btn" :class="{ 'is-loading': quickExportLoading }" @click="exportStructuredFromDashboard">
+                    {{ quickExportLoading ? '导出中...' : '数据导出' }}
                 </div>
             </div>
         </div>
@@ -854,6 +948,12 @@ html.dark .delete-btn {
 .action-btn.disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    pointer-events: none;
+}
+
+.action-btn.is-loading {
+    opacity: 0.7;
+    cursor: wait;
     pointer-events: none;
 }
 

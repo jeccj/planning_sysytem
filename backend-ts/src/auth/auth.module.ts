@@ -6,10 +6,11 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { User } from '../users/entities/user.entity';
+import { SystemConfig } from '../system-config/entities/system-config.entity';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([User]),
+        TypeOrmModule.forFeature([User, SystemConfig]),
         PassportModule,
         JwtModule.register({
             secret: process.env.JWT_SECRET || 'SECRET_KEY_FOR_DEV_ONLY',

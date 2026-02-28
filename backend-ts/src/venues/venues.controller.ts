@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpException, HttpStatus, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, HttpException, HttpStatus, UseInterceptors, UploadedFiles, BadRequestException } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { mkdirSync } from 'fs';
@@ -42,7 +42,7 @@ export class VenuesController {
 
     @Get('structure')
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN)
     async getVenueStructure(@CurrentUser() user: User) {
         const scope = this.buildVenueScope(user);
         return this.venuesService.getVenueStructure(scope);
@@ -50,13 +50,66 @@ export class VenuesController {
 
     @Get('building-availability')
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN, UserRole.STUDENT_TEACHER)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.STUDENT_TEACHER)
     async getBuildingAvailability(
         @CurrentUser() user: User,
         @Query('building') building?: string,
     ) {
         const scope = this.buildVenueScope(user);
         return this.venuesService.getBuildingAvailability(building, scope);
+    }
+
+    @Get('catalog')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN)
+    async getVenueHierarchyCatalog(@CurrentUser() user: User) {
+        const scope = this.buildVenueScope(user);
+        return this.venuesService.getVenueHierarchyCatalog(scope);
+    }
+
+    @Post('catalog/buildings')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserRole.SYS_ADMIN)
+    async createCatalogBuilding(
+        @Body() body: {
+            building_name?: string;
+            floors?: string[] | string;
+            auto_create_managers?: boolean | string;
+            manager_password?: string;
+        },
+    ) {
+        const floors = Array.isArray(body?.floors)
+            ? body.floors
+            : (typeof body?.floors === 'string'
+                ? body.floors.split(/[;,，\n]/).map((item) => String(item || '').trim()).filter(Boolean)
+                : []);
+        const autoCreateManagers = this.parseOptionalBoolean(body?.auto_create_managers, true);
+        return this.venuesService.createBuildingCatalog({
+            building_name: String(body?.building_name || '').trim(),
+            floors,
+            auto_create_managers: autoCreateManagers,
+            manager_password: String(body?.manager_password || '').trim(),
+        });
+    }
+
+    @Post('catalog/floors')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserRole.SYS_ADMIN)
+    async createCatalogFloor(
+        @Body() body: {
+            building_name?: string;
+            floor_label?: string;
+            auto_create_manager?: boolean | string;
+            manager_password?: string;
+        },
+    ) {
+        const autoCreateManager = this.parseOptionalBoolean(body?.auto_create_manager, false);
+        return this.venuesService.createFloorCatalog({
+            building_name: String(body?.building_name || '').trim(),
+            floor_label: String(body?.floor_label || '').trim(),
+            auto_create_manager: autoCreateManager,
+            manager_password: String(body?.manager_password || '').trim(),
+        });
     }
 
     @Post()
@@ -114,7 +167,7 @@ export class VenuesController {
 
     @Put(':id')
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN)
     async update(
         @CurrentUser() user: User,
         @Param('id') id: string,
@@ -142,7 +195,7 @@ export class VenuesController {
 
     @Delete(':id')
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN)
     async remove(@CurrentUser() user: User, @Param('id') id: string): Promise<VenueResponseDto> {
         try {
             const existing = await this.venuesService.findOne(+id);
@@ -162,7 +215,7 @@ export class VenuesController {
 
     @Post(':id/photos')
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN)
     @UseInterceptors(FilesInterceptor('photos', 10, {
         storage: diskStorage({
             destination: (_req, _file, cb) => {
@@ -199,7 +252,7 @@ export class VenuesController {
 
     @Delete(':id/photos')
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN)
     async deletePhoto(
         @CurrentUser() user: User,
         @Param('id') id: string,
@@ -457,7 +510,7 @@ export class VenuesController {
 
     @Post(':id/maintenance')
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN)
+    @Roles(UserRole.SYS_ADMIN, UserRole.VENUE_ADMIN)
     async scheduleMaintenance(
         @CurrentUser() user: User,
         @Param('id') id: string,
@@ -487,7 +540,7 @@ export class VenuesController {
         if (user.role === UserRole.SYS_ADMIN) {
             return;
         }
-        if (![UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN].includes(user.role)) {
+        if (user.role !== UserRole.VENUE_ADMIN) {
             throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
         }
         const parsed = parseVenueLocation(venue.location, venue.name);
@@ -510,7 +563,7 @@ export class VenuesController {
         if (user.role === UserRole.SYS_ADMIN) {
             return;
         }
-        if (![UserRole.VENUE_ADMIN, UserRole.FLOOR_ADMIN].includes(user.role)) {
+        if (user.role !== UserRole.VENUE_ADMIN) {
             return;
         }
         const parsed = parseVenueLocation(existingVenue.location, existingVenue.name);
@@ -544,14 +597,15 @@ export class VenuesController {
                 managedFloor,
             };
         }
-        if (user.role === UserRole.FLOOR_ADMIN) {
-            const managedBuilding = (user.managedBuilding || '').trim();
-            const managedFloor = (user.managedFloor || '').trim();
-            if (!managedBuilding && !managedFloor) {
-                return { role: user.role, managedBuilding: '__NO_SCOPE__' };
-            }
-            return { role: user.role, managedBuilding, managedFloor };
-        }
         return { role: user.role };
+    }
+
+    private parseOptionalBoolean(raw: unknown, defaultValue: boolean): boolean {
+        if (raw === undefined || raw === null || raw === '') return defaultValue;
+        if (typeof raw === 'boolean') return raw;
+        const text = String(raw).trim().toLowerCase();
+        if (['1', 'true', 'yes', 'on'].includes(text)) return true;
+        if (['0', 'false', 'no', 'off'].includes(text)) return false;
+        throw new BadRequestException(`invalid boolean value: ${raw}`);
     }
 }

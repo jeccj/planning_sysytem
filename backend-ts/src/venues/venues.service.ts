@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, MoreThan, In } from 'typeorm';
 import { Venue } from './entities/venue.entity';
@@ -12,6 +12,8 @@ import { ReservationSlot } from '../reservations/entities/reservation-slot.entit
 import { DataSource } from 'typeorm';
 import { buildSlotWindows, isUniqueSlotError } from '../reservations/utils/slot-utils';
 import { parseDateTimeWithTimezone } from '../common/utils/datetime.utils';
+import { UsersService } from '../users/users.service';
+import { SystemConfigService } from '../system-config/system-config.service';
 
 export interface BuildingClassroomStatus {
     id: number;
@@ -62,6 +64,46 @@ export interface VenueStructureOverview {
     }>;
 }
 
+interface VenueHierarchyCatalogEntry {
+    building_name: string;
+    floors: string[];
+}
+
+interface VenueHierarchyCatalogStore {
+    buildings: VenueHierarchyCatalogEntry[];
+}
+
+export interface VenueHierarchyCatalogView {
+    buildings: Array<{
+        building_name: string;
+        floors: string[];
+        manager_count: number;
+        managers: Array<{
+            id: number;
+            username: string;
+            managed_floor: string;
+        }>;
+    }>;
+}
+
+export interface CreateBuildingCatalogInput {
+    building_name: string;
+    floors?: string[];
+    auto_create_managers?: boolean;
+    manager_password?: string;
+}
+
+export interface CreateFloorCatalogInput {
+    building_name: string;
+    floor_label: string;
+    auto_create_manager?: boolean;
+    manager_password?: string;
+}
+
+const VENUE_HIERARCHY_CATALOG_KEY = 'venue_hierarchy_catalog_v1';
+const VENUE_HIERARCHY_CATALOG_DESC = 'Building/Floor catalog for structured venue creation';
+const DEFAULT_AUTO_VENUE_ADMIN_PASSWORD = 'Admin@123456';
+
 @Injectable()
 export class VenuesService {
     constructor(
@@ -74,7 +116,291 @@ export class VenuesService {
         @InjectRepository(ReservationSlot)
         private slotRepository: Repository<ReservationSlot>,
         private dataSource: DataSource,
+        private usersService: UsersService,
+        private systemConfigService: SystemConfigService,
     ) { }
+
+    private normalizeLabel(input: unknown): string {
+        return String(input || '').trim();
+    }
+
+    private slugify(input: string): string {
+        return String(input || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '_')
+            .replace(/^_+|_+$/g, '');
+    }
+
+    private normalizeFloorList(raw: unknown): string[] {
+        if (Array.isArray(raw)) {
+            return Array.from(new Set(raw.map((item) => this.normalizeLabel(item)).filter(Boolean)));
+        }
+        if (typeof raw === 'string') {
+            return Array.from(
+                new Set(
+                    raw
+                        .split(/[;,，\n]/)
+                        .map((item) => this.normalizeLabel(item))
+                        .filter(Boolean),
+                ),
+            );
+        }
+        return [];
+    }
+
+    private parseCatalogStore(rawValue: string | null): VenueHierarchyCatalogStore {
+        if (!rawValue) {
+            return { buildings: [] };
+        }
+        try {
+            const parsed = JSON.parse(rawValue);
+            const rawBuildings = Array.isArray(parsed?.buildings) ? parsed.buildings : [];
+            const buildings: VenueHierarchyCatalogEntry[] = rawBuildings
+                .map((item: any) => {
+                    const buildingName = this.normalizeLabel(item?.building_name);
+                    if (!buildingName) return null;
+                    return {
+                        building_name: buildingName,
+                        floors: this.normalizeFloorList(item?.floors),
+                    } as VenueHierarchyCatalogEntry;
+                })
+                .filter(Boolean);
+            return { buildings };
+        } catch {
+            return { buildings: [] };
+        }
+    }
+
+    private async loadCatalogStore(): Promise<VenueHierarchyCatalogStore> {
+        const raw = await this.systemConfigService.findByKey(VENUE_HIERARCHY_CATALOG_KEY);
+        return this.parseCatalogStore(raw);
+    }
+
+    private async saveCatalogStore(store: VenueHierarchyCatalogStore): Promise<void> {
+        const dedupedBuildings: VenueHierarchyCatalogEntry[] = [];
+        const seen = new Set<string>();
+        for (const entry of Array.isArray(store.buildings) ? store.buildings : []) {
+            const buildingName = this.normalizeLabel(entry.building_name);
+            if (!buildingName || seen.has(buildingName)) continue;
+            seen.add(buildingName);
+            dedupedBuildings.push({
+                building_name: buildingName,
+                floors: this.normalizeFloorList(entry.floors),
+            });
+        }
+        await this.systemConfigService.setConfig(
+            VENUE_HIERARCHY_CATALOG_KEY,
+            JSON.stringify({ buildings: dedupedBuildings }),
+            VENUE_HIERARCHY_CATALOG_DESC,
+        );
+    }
+
+    private async buildMergedCatalogMap(
+        scope?: { role?: UserRole; adminId?: number; managedBuilding?: string; managedFloor?: string },
+    ): Promise<Map<string, Set<string>>> {
+        const map = new Map<string, Set<string>>();
+        const store = await this.loadCatalogStore();
+        for (const entry of store.buildings) {
+            const buildingName = this.normalizeLabel(entry.building_name);
+            if (!buildingName) continue;
+            const floorSet = map.get(buildingName) || new Set<string>();
+            this.normalizeFloorList(entry.floors).forEach((floor) => floorSet.add(floor));
+            map.set(buildingName, floorSet);
+        }
+
+        const venues = await this.findAll(0, 10000, scope);
+        venues.forEach((venue) => {
+            const parsed = parseVenueLocation(venue.location, venue.name);
+            const buildingName = this.normalizeLabel(venue.buildingName || parsed.buildingName);
+            const floorLabel = this.normalizeLabel(venue.floorLabel || parsed.floorLabel);
+            if (!buildingName) return;
+            const floorSet = map.get(buildingName) || new Set<string>();
+            if (floorLabel) floorSet.add(floorLabel);
+            map.set(buildingName, floorSet);
+        });
+        return map;
+    }
+
+    private async assertCatalogBuildingFloorExists(buildingName: string, floorLabel: string): Promise<void> {
+        const nextBuilding = this.normalizeLabel(buildingName);
+        const nextFloor = this.normalizeLabel(floorLabel);
+        if (!nextBuilding) {
+            throw new BadRequestException('创建场馆前请先选择/创建基础楼栋');
+        }
+        if (!nextFloor) {
+            throw new BadRequestException('创建场馆前请先选择/创建楼层单元');
+        }
+        const catalog = await this.buildMergedCatalogMap();
+        if (!catalog.has(nextBuilding)) {
+            throw new BadRequestException(`楼栋 "${nextBuilding}" 不存在，请先创建基础楼栋`);
+        }
+        const floorSet = catalog.get(nextBuilding) || new Set<string>();
+        if (!floorSet.has(nextFloor)) {
+            throw new BadRequestException(`楼栋 "${nextBuilding}" 下不存在楼层 "${nextFloor}"，请先创建楼层单元`);
+        }
+    }
+
+    private async generateUniqueVenueAdminUsername(base: string): Promise<string> {
+        const normalizedBase = this.normalizeLabel(base).slice(0, 42) || 'venue_admin_auto';
+        let candidate = normalizedBase;
+        let counter = 1;
+        while (await this.usersService.findByUsername(candidate)) {
+            counter += 1;
+            candidate = `${normalizedBase}_${counter}`.slice(0, 50);
+        }
+        return candidate;
+    }
+
+    private async createAutoVenueAdmin(
+        buildingName: string,
+        floorLabel: string,
+        password: string,
+    ): Promise<{ id: number; username: string; managed_floor: string }> {
+        const buildingSlug = this.slugify(buildingName).slice(0, 16) || 'building';
+        const floorSlug = this.slugify(floorLabel).slice(0, 10);
+        const base = floorSlug ? `venue_admin_${buildingSlug}_${floorSlug}` : `venue_admin_${buildingSlug}`;
+        const username = await this.generateUniqueVenueAdminUsername(base);
+        const seed = Math.floor(Math.random() * 900000) + 100000;
+        const created = await this.usersService.create({
+            username,
+            password: password || DEFAULT_AUTO_VENUE_ADMIN_PASSWORD,
+            role: UserRole.VENUE_ADMIN,
+            contact_info: `auto-manager:${buildingName}${floorLabel ? `/${floorLabel}` : ''}`,
+            identity_last6: String(seed),
+            managed_building: buildingName,
+            managed_floor: floorLabel || '',
+        } as any);
+        return {
+            id: created.id,
+            username: created.username,
+            managed_floor: created.managedFloor || '',
+        };
+    }
+
+    async getVenueHierarchyCatalog(
+        scope?: { role?: UserRole; adminId?: number; managedBuilding?: string; managedFloor?: string },
+    ): Promise<VenueHierarchyCatalogView> {
+        const catalog = await this.buildMergedCatalogMap(scope);
+        const users = await this.usersService.findAll(0, 10000);
+        const managerMap = new Map<string, Array<{ id: number; username: string; managed_floor: string }>>();
+        users
+            .filter((user) => user.role === UserRole.VENUE_ADMIN)
+            .forEach((user) => {
+                const building = this.normalizeLabel(user.managedBuilding);
+                if (!building) return;
+                const list = managerMap.get(building) || [];
+                list.push({
+                    id: user.id,
+                    username: user.username,
+                    managed_floor: this.normalizeLabel(user.managedFloor),
+                });
+                managerMap.set(building, list);
+            });
+
+        const buildings = Array.from(catalog.entries())
+            .map(([buildingName, floors]) => {
+                const managers = (managerMap.get(buildingName) || []).sort((a, b) => a.username.localeCompare(b.username, 'zh-CN'));
+                return {
+                    building_name: buildingName,
+                    floors: Array.from(floors).sort((a, b) => a.localeCompare(b, 'zh-CN')),
+                    manager_count: managers.length,
+                    managers,
+                };
+            })
+            .sort((a, b) => a.building_name.localeCompare(b.building_name, 'zh-CN'));
+
+        return { buildings };
+    }
+
+    async createBuildingCatalog(input: CreateBuildingCatalogInput): Promise<{
+        building_name: string;
+        floors: string[];
+        created_managers: Array<{ id: number; username: string; managed_floor: string }>;
+    }> {
+        const buildingName = this.normalizeLabel(input?.building_name);
+        if (!buildingName) {
+            throw new BadRequestException('building_name is required');
+        }
+        const floorList = this.normalizeFloorList(input?.floors);
+        const mergedMap = await this.buildMergedCatalogMap();
+        if (mergedMap.has(buildingName)) {
+            throw new BadRequestException(`楼栋 "${buildingName}" 已存在`);
+        }
+
+        const store = await this.loadCatalogStore();
+        store.buildings.push({
+            building_name: buildingName,
+            floors: floorList,
+        });
+        await this.saveCatalogStore(store);
+
+        const autoCreateManagers = input?.auto_create_managers !== false;
+        const managerPassword = this.normalizeLabel(input?.manager_password) || DEFAULT_AUTO_VENUE_ADMIN_PASSWORD;
+        const managerFloors = floorList.length > 0 ? floorList : [''];
+        const createdManagers: Array<{ id: number; username: string; managed_floor: string }> = [];
+        if (autoCreateManagers) {
+            for (const floor of managerFloors) {
+                const created = await this.createAutoVenueAdmin(buildingName, floor, managerPassword);
+                createdManagers.push(created);
+            }
+        }
+
+        return {
+            building_name: buildingName,
+            floors: floorList,
+            created_managers: createdManagers,
+        };
+    }
+
+    async createFloorCatalog(input: CreateFloorCatalogInput): Promise<{
+        building_name: string;
+        floor_label: string;
+        created_manager?: { id: number; username: string; managed_floor: string };
+    }> {
+        const buildingName = this.normalizeLabel(input?.building_name);
+        const floorLabel = this.normalizeLabel(input?.floor_label);
+        if (!buildingName) {
+            throw new BadRequestException('building_name is required');
+        }
+        if (!floorLabel) {
+            throw new BadRequestException('floor_label is required');
+        }
+
+        const mergedMap = await this.buildMergedCatalogMap();
+        if (!mergedMap.has(buildingName)) {
+            throw new BadRequestException(`楼栋 "${buildingName}" 不存在，请先创建基础楼栋`);
+        }
+        const existingFloors = mergedMap.get(buildingName) || new Set<string>();
+        if (existingFloors.has(floorLabel)) {
+            throw new BadRequestException(`楼层 "${buildingName}/${floorLabel}" 已存在`);
+        }
+
+        const store = await this.loadCatalogStore();
+        const target = store.buildings.find((item) => this.normalizeLabel(item.building_name) === buildingName);
+        if (target) {
+            target.floors = this.normalizeFloorList([...(target.floors || []), floorLabel]);
+        } else {
+            store.buildings.push({
+                building_name: buildingName,
+                floors: [floorLabel],
+            });
+        }
+        await this.saveCatalogStore(store);
+
+        const autoCreateManager = input?.auto_create_manager === true;
+        let createdManager: { id: number; username: string; managed_floor: string } | undefined;
+        if (autoCreateManager) {
+            const managerPassword = this.normalizeLabel(input?.manager_password) || DEFAULT_AUTO_VENUE_ADMIN_PASSWORD;
+            createdManager = await this.createAutoVenueAdmin(buildingName, floorLabel, managerPassword);
+        }
+
+        return {
+            building_name: buildingName,
+            floor_label: floorLabel,
+            ...(createdManager ? { created_manager: createdManager } : {}),
+        };
+    }
 
     async findAll(
         skip: number = 0,
@@ -101,18 +427,6 @@ export class VenuesService {
             }
         }
 
-        if (scope?.role === UserRole.FLOOR_ADMIN) {
-            if (scope.managedBuilding) {
-                qb.andWhere('(venue.building_name = :buildingName OR venue.location LIKE :buildingLike)', {
-                    buildingName: scope.managedBuilding,
-                    buildingLike: `%${scope.managedBuilding}%`,
-                });
-            }
-            if (scope.managedFloor) {
-                qb.andWhere('venue.floor_label = :floorLabel', { floorLabel: scope.managedFloor });
-            }
-        }
-
         return qb.getMany();
     }
 
@@ -125,6 +439,7 @@ export class VenuesService {
         const buildingName = createVenueDto.building_name || parsed.buildingName;
         const floorLabel = createVenueDto.floor_label || parsed.floorLabel;
         const roomCode = createVenueDto.room_code || parsed.roomName || createVenueDto.name;
+        await this.assertCatalogBuildingFloorExists(buildingName, floorLabel);
         const location = buildVenueLocation(buildingName, floorLabel, roomCode, createVenueDto.location);
 
         const venue = this.venueRepository.create({
@@ -174,6 +489,7 @@ export class VenuesService {
         venue.buildingName = updateVenueDto.building_name || venue.buildingName || parsed.buildingName;
         venue.floorLabel = updateVenueDto.floor_label || venue.floorLabel || parsed.floorLabel;
         venue.roomCode = updateVenueDto.room_code || venue.roomCode || parsed.roomName || venue.name;
+        await this.assertCatalogBuildingFloorExists(venue.buildingName, venue.floorLabel);
         venue.location = buildVenueLocation(venue.buildingName, venue.floorLabel, venue.roomCode, nextLocation);
 
         // TypeORM usually handles JSON/array serialization automatically for @Column('simple-json')
@@ -254,18 +570,6 @@ export class VenuesService {
             }
             if (!scope.managedBuilding && !scope.managedFloor && scope.adminId) {
                 qb.andWhere('venue.admin_id = :adminId', { adminId: scope.adminId });
-            }
-        }
-
-        if (scope?.role === UserRole.FLOOR_ADMIN) {
-            if (scope.managedBuilding) {
-                qb.andWhere('(venue.building_name = :buildingName OR venue.location LIKE :buildingLike)', {
-                    buildingName: scope.managedBuilding,
-                    buildingLike: `%${scope.managedBuilding}%`,
-                });
-            }
-            if (scope.managedFloor) {
-                qb.andWhere('venue.floor_label = :floorLabel', { floorLabel: scope.managedFloor });
             }
         }
 
@@ -389,17 +693,6 @@ export class VenuesService {
             }
             if (!scope.managedBuilding && !scope.managedFloor && scope.adminId) {
                 qb.andWhere('venue.admin_id = :adminId', { adminId: scope.adminId });
-            }
-        }
-        if (scope?.role === UserRole.FLOOR_ADMIN) {
-            if (scope.managedBuilding) {
-                qb.andWhere('(venue.building_name = :buildingName OR venue.location LIKE :buildingLike)', {
-                    buildingName: scope.managedBuilding,
-                    buildingLike: `%${scope.managedBuilding}%`,
-                });
-            }
-            if (scope.managedFloor) {
-                qb.andWhere('venue.floor_label = :floorLabel', { floorLabel: scope.managedFloor });
             }
         }
 

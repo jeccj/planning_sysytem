@@ -29,7 +29,7 @@ const authStore = useAuthStore()
 
 const activeMenu = computed(() => route.path)
 const userRole = computed(() => authStore.user?.role)
-const isAdminUser = computed(() => ['sys_admin', 'venue_admin', 'floor_admin'].includes(userRole.value))
+const isAdminUser = computed(() => ['sys_admin', 'venue_admin'].includes(userRole.value))
 const hasManagedScope = computed(() => {
     const building = (authStore.user?.managed_building || '').trim()
     const floor = (authStore.user?.managed_floor || '').trim()
@@ -37,7 +37,7 @@ const hasManagedScope = computed(() => {
 })
 const canAccessVenueTab = computed(() => {
     if (userRole.value === 'sys_admin') return true
-    if (['venue_admin', 'floor_admin'].includes(userRole.value)) return hasManagedScope.value
+    if (userRole.value === 'venue_admin') return hasManagedScope.value
     return false
 })
 
@@ -327,7 +327,6 @@ const pageTitle = computed(() => {
 const userRoleLabel = computed(() => {
     const role = authStore.user?.role
     if (role === 'sys_admin') return '系统管理员'
-    if (role === 'floor_admin') return '楼层管理员'
     if (role === 'venue_admin') return '场馆管理员'
     return '师生用户'
 })
@@ -447,7 +446,7 @@ const handleLogout = () => {
           </template>
 
           <!-- Admin Menu -->
-          <template v-if="['venue_admin', 'floor_admin', 'sys_admin'].includes(userRole)">
+          <template v-if="['venue_admin', 'sys_admin'].includes(userRole)">
              <el-menu-item index="/admin/dashboard">
               <el-icon><Monitor /></el-icon>
               <span>概览</span>
@@ -496,12 +495,12 @@ const handleLogout = () => {
                 <el-avatar
                   :size="28"
                   :style="{
-                    background: ['venue_admin', 'floor_admin', 'sys_admin'].includes(userRole) ? '#626aef' : '#409eff',
+                    background: ['venue_admin', 'sys_admin'].includes(userRole) ? '#626aef' : '#409eff',
                     marginRight: '8px',
                     fontSize: '14px'
                   }"
                 >
-                    <el-icon v-if="['venue_admin', 'floor_admin', 'sys_admin'].includes(userRole)"><UserFilled /></el-icon>
+                    <el-icon v-if="['venue_admin', 'sys_admin'].includes(userRole)"><UserFilled /></el-icon>
                     <el-icon v-else><User /></el-icon>
                 </el-avatar>
                 <div class="user-meta-inline">

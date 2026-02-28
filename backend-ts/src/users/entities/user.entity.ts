@@ -39,6 +39,12 @@ export class User {
     @Column({ name: 'login_session_id', nullable: true, default: '' })
     loginSessionId: string;
 
+    @Column({ name: 'last_login_at', type: 'datetime', nullable: true })
+    lastLoginAt?: Date | null;
+
+    @Column({ name: 'last_active_at', type: 'datetime', nullable: true })
+    lastActiveAt?: Date | null;
+
     @OneToMany(() => Venue, (venue) => venue.admin)
     venuesManaged: Venue[];
 

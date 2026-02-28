@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -6,16 +6,31 @@ import * as bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 import { User } from '../users/entities/user.entity';
 import { TokenResponseDto } from './dto/token-response.dto';
+import { SystemConfig } from '../system-config/entities/system-config.entity';
 
 const MAX_BCRYPT_BYTES = 72;
+const IMPORT_MAINTENANCE_ACTIVE_KEY = 'import_maintenance_active';
 
 @Injectable()
 export class AuthService {
     constructor(
         @InjectRepository(User)
         private userRepository: Repository<User>,
+        @InjectRepository(SystemConfig)
+        private configRepository: Repository<SystemConfig>,
         private jwtService: JwtService,
     ) { }
+
+    private async isImportMaintenanceActive(): Promise<boolean> {
+        const config = await this.configRepository.findOne({ where: { key: IMPORT_MAINTENANCE_ACTIVE_KEY } });
+        return String(config?.value || '').trim().toLowerCase() === 'true';
+    }
+
+    async assertLoginAllowed(): Promise<void> {
+        if (await this.isImportMaintenanceActive()) {
+            throw new ServiceUnavailableException('系统正在维护（数据导入中），暂不支持登录');
+        }
+    }
 
     async validatePassword(plainPassword: string, hashedPassword: string): Promise<boolean> {
         if (!plainPassword || !hashedPassword) {
@@ -46,7 +61,10 @@ export class AuthService {
 
     async login(user: User): Promise<TokenResponseDto> {
         const sessionId = randomUUID();
+        const now = new Date();
         user.loginSessionId = sessionId;
+        user.lastLoginAt = now;
+        user.lastActiveAt = now;
         await this.userRepository.save(user);
         const payload = { sub: user.id, username: user.username, role: user.role, sid: sessionId };
 

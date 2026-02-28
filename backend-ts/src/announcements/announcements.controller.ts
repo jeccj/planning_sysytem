@@ -67,6 +67,17 @@ export class AnnouncementsController {
         }
     }
 
+    @Delete('history/all')
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(UserRole.SYS_ADMIN)
+    async clearAllHistory(): Promise<{ ok: boolean; deleted: number }> {
+        const deleted = await this.announcementsService.clearAllHistory();
+        return {
+            ok: true,
+            deleted,
+        };
+    }
+
     @Delete(':id')
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(UserRole.SYS_ADMIN)

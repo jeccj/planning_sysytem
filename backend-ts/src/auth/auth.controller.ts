@@ -15,6 +15,7 @@ export class AuthController {
 
     @Post('login')
     async login(@Body() loginDto: LoginDto): Promise<TokenResponseDto> {
+        await this.authService.assertLoginAllowed();
         const user = await this.authService.validateUser(loginDto.username, loginDto.password);
 
         if (!user) {

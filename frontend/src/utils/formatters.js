@@ -60,7 +60,7 @@ export const getStatusType = (status) => {
 export const getRoleLabel = (role) => {
   const map = {
     student_teacher: '师生',
-    floor_admin: '楼层管理员',
+    floor_admin: '楼层管理员(已弃用)',
     venue_admin: '场馆管理员',
     sys_admin: '系统管理员',
   }
@@ -71,7 +71,7 @@ export const getRoleLabel = (role) => {
 export const getRoleType = (role) => {
   const map = {
     student_teacher: '',
-    floor_admin: 'warning',
+    floor_admin: 'info',
     venue_admin: 'warning',
     sys_admin: 'danger',
   }

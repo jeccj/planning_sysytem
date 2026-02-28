@@ -32,6 +32,7 @@ export const announcementApi = {
   create: (data) => api.post('/announcements/', data),
   update: (id, data) => api.put(`/announcements/${id}`, data),
   remove: (id) => api.delete(`/announcements/${id}`),
+  clearHistory: () => api.delete('/announcements/history/all'),
 }
 
 // ========== 通知 ==========
@@ -70,4 +71,6 @@ export const nlpApi = {
 export const systemConfigApi = {
   getAll: () => api.get('/system-config'),
   update: (configs) => api.put('/system-config', { configs }),
+  exportUsersCsv: () => api.get('/system-config/export/structured/users', { responseType: 'blob' }),
+  exportVenuesCsv: () => api.get('/system-config/export/structured/venues', { responseType: 'blob' }),
 }

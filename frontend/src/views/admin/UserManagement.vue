@@ -12,11 +12,10 @@ const users = ref([])
 const venues = ref([])
 const keyword = ref('')
 const roleFilter = ref('')
-const roleOrder = ['sys_admin', 'venue_admin', 'floor_admin', 'student_teacher']
+const roleOrder = ['sys_admin', 'venue_admin', 'student_teacher']
 const roleGroupMeta = {
     sys_admin: { label: '系统管理员', note: '全局配置与安全管理' },
     venue_admin: { label: '场馆管理员', note: '场馆维护与资源调度' },
-    floor_admin: { label: '楼层管理员', note: '楼栋/楼层范围管理' },
     student_teacher: { label: '师生用户', note: '发起预约与查看审批' },
 }
 
@@ -84,7 +83,7 @@ const openEdit = (user) => {
     showModal.value = true
 }
 
-const isScopedRole = (role) => ['floor_admin', 'venue_admin'].includes(role)
+const isScopedRole = (role) => role === 'venue_admin'
 
 const submitEdit = async () => {
     try {
@@ -331,7 +330,6 @@ const submitCreate = async () => {
                 <el-select v-model="roleFilter" clearable placeholder="角色筛选" class="toolbar-field">
                     <el-option label="全部角色" value="" />
                     <el-option label="师生" value="student_teacher" />
-                    <el-option label="楼层管理员" value="floor_admin" />
                     <el-option label="场馆管理员" value="venue_admin" />
                     <el-option label="系统管理员" value="sys_admin" />
                 </el-select>
@@ -399,7 +397,6 @@ const submitCreate = async () => {
                 <el-form-item label="用户角色">
                     <el-select v-model="editForm.role" style="width: 100%;">
                         <el-option label="师生" value="student_teacher" />
-                        <el-option label="楼层管理员" value="floor_admin" />
                         <el-option label="场馆管理员" value="venue_admin" />
                         <el-option label="系统管理员" value="sys_admin" />
                     </el-select>
@@ -468,7 +465,6 @@ const submitCreate = async () => {
                 <el-form-item label="用户角色">
                     <el-select v-model="createForm.role" style="width: 100%;">
                         <el-option label="师生" value="student_teacher" />
-                        <el-option label="楼层管理员" value="floor_admin" />
                         <el-option label="场馆管理员" value="venue_admin" />
                         <el-option label="系统管理员" value="sys_admin" />
                     </el-select>

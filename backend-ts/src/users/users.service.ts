@@ -41,9 +41,7 @@ export class UsersService {
 
     async create(createUserDto: CreateUserDto): Promise<User> {
         if (createUserDto.role === UserRole.FLOOR_ADMIN) {
-            if (!createUserDto.managed_building && !createUserDto.managed_floor) {
-                throw new BadRequestException('floor_admin requires managed_building or managed_floor');
-            }
+            throw new BadRequestException('floor_admin role is deprecated, please use venue_admin');
         }
 
         const existingUser = await this.findByUsername(createUserDto.username);
@@ -54,7 +52,7 @@ export class UsersService {
         const saltRounds = 10;
         const hashedPassword = await bcrypt.hash(createUserDto.password, saltRounds);
 
-        const isScopedAdmin = createUserDto.role === UserRole.FLOOR_ADMIN || createUserDto.role === UserRole.VENUE_ADMIN;
+        const isScopedAdmin = createUserDto.role === UserRole.VENUE_ADMIN;
         const user = this.userRepository.create({
             username: createUserDto.username,
             hashedPassword,
@@ -102,24 +100,15 @@ export class UsersService {
         }
 
         const targetRole = updateUserDto.role ?? user.role;
-        if (targetRole === UserRole.FLOOR_ADMIN || targetRole === UserRole.VENUE_ADMIN) {
-            if (
-                targetRole === UserRole.FLOOR_ADMIN &&
-                !Object.prototype.hasOwnProperty.call(updateUserDto, 'managed_building') &&
-                !Object.prototype.hasOwnProperty.call(updateUserDto, 'managed_floor') &&
-                !user.managedBuilding &&
-                !user.managedFloor
-            ) {
-                throw new BadRequestException('floor_admin requires managed_building or managed_floor');
-            }
+        if (targetRole === UserRole.FLOOR_ADMIN) {
+            throw new BadRequestException('floor_admin role is deprecated, please use venue_admin');
+        }
+        if (targetRole === UserRole.VENUE_ADMIN) {
             if (Object.prototype.hasOwnProperty.call(updateUserDto, 'managed_building')) {
                 user.managedBuilding = updateUserDto.managed_building ?? '';
             }
             if (Object.prototype.hasOwnProperty.call(updateUserDto, 'managed_floor')) {
                 user.managedFloor = updateUserDto.managed_floor ?? '';
-            }
-            if (targetRole === UserRole.FLOOR_ADMIN && !user.managedBuilding && !user.managedFloor) {
-                throw new BadRequestException('floor_admin requires managed_building or managed_floor');
             }
         } else {
             user.managedBuilding = '';

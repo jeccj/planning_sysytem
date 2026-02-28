@@ -105,19 +105,15 @@ const handlePasswordChange = async () => {
       old_password: passwordForm.value.oldPassword,
       new_password: passwordForm.value.newPassword
     })
-    
-    ElMessage.success('密码修改成功')
+
+    ElMessage.success('密码修改成功，请使用新密码重新登录')
     showPasswordChangeDialog.value = false
-    
-    // 更新用户信息
-    const userRes = await api.get('/users/me')
-    authStore.setUser(userRes.data)
-    
-    // 获取公告并显示确认
-    await fetchAnnouncementsAndShow()
-    
+    authStore.logout()
+    form.value.password = ''
+    passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
   } catch (error) {
-    ElMessage.error('密码修改失败')
+    const msg = error?.response?.data?.message || error?.response?.data?.detail || '密码修改失败'
+    ElMessage.error(typeof msg === 'string' ? msg : '密码修改失败')
   } finally {
     passwordLoading.value = false
   }

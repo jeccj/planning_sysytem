@@ -19,6 +19,8 @@ api.interceptors.request.use((config) => {
 let isLoggingOut = false
 let lastAuthWarnAt = 0
 const AUTH_WARN_COOLDOWN_MS = 3000
+let lastMaintenanceWarnAt = 0
+const MAINTENANCE_WARN_COOLDOWN_MS = 3000
 
 api.interceptors.response.use(
     (response) => {
@@ -58,6 +60,20 @@ api.interceptors.response.use(
             }
             authStore.logout()
             router.replace('/login')
+        }
+
+        if (error.response && error.response.status === 503) {
+            const detail = String(error?.response?.data?.message || error?.response?.data?.detail || '系统维护中，请稍后重试')
+            const now = Date.now()
+            if (!silentAuth && now - lastMaintenanceWarnAt > MAINTENANCE_WARN_COOLDOWN_MS) {
+                lastMaintenanceWarnAt = now
+                ElMessage.closeAll()
+                ElMessage.warning(detail)
+            }
+            if (hasToken || hasAuthHeader) {
+                authStore.logout()
+                router.replace('/login')
+            }
         }
         return Promise.reject(error)
     }

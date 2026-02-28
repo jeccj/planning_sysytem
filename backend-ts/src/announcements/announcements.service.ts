@@ -105,4 +105,18 @@ export class AnnouncementsService {
     async remove(id: number): Promise<void> {
         await this.announcementRepository.delete(id);
     }
+
+    async clearAllHistory(): Promise<number> {
+        return this.announcementRepository.manager.transaction(async (manager) => {
+            const result = await manager
+                .createQueryBuilder()
+                .delete()
+                .from(Announcement)
+                .execute();
+
+            // SQLite AUTOINCREMENT sequence reset, so next insert starts from 1 after full clear.
+            await manager.query(`DELETE FROM sqlite_sequence WHERE name = ?`, ['announcements']);
+            return Number(result?.affected || 0);
+        });
+    }
 }
