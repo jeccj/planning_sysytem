@@ -15,6 +15,10 @@ import {
   isUniqueSlotError,
 } from '../reservations/utils/slot-utils';
 import { parseDateTimeWithTimezone } from '../common/utils/datetime.utils';
+import {
+  isReservationWithinVenueOpenHours,
+  normalizeAndValidateOpenHoursForStorage,
+} from '../common/utils/open-hours.utils';
 import { UsersService } from '../users/users.service';
 import { SystemConfigService } from '../system-config/system-config.service';
 
@@ -525,6 +529,9 @@ export class VenuesService {
     createVenueDto: CreateVenueDto,
     adminId: number,
   ): Promise<Venue> {
+    const openHours = normalizeAndValidateOpenHoursForStorage(
+      createVenueDto.open_hours,
+    );
     const parsed = parseVenueLocation(
       createVenueDto.location,
       createVenueDto.name,
@@ -546,7 +553,7 @@ export class VenuesService {
       type: createVenueDto.type,
       capacity: createVenueDto.capacity,
       status: createVenueDto.status || VenueStatus.AVAILABLE,
-      openHours: createVenueDto.open_hours,
+      openHours,
       description: createVenueDto.description,
       imageUrl: createVenueDto.image_url,
       photos: createVenueDto.photos || [],
@@ -576,7 +583,9 @@ export class VenuesService {
     if (updateVenueDto.status !== undefined)
       venue.status = updateVenueDto.status;
     if (updateVenueDto.open_hours !== undefined)
-      venue.openHours = updateVenueDto.open_hours;
+      venue.openHours = normalizeAndValidateOpenHoursForStorage(
+        updateVenueDto.open_hours,
+      );
     if (updateVenueDto.description !== undefined)
       venue.description = updateVenueDto.description;
     if (updateVenueDto.image_url !== undefined)
@@ -1009,6 +1018,9 @@ export class VenuesService {
     }
 
     for (const venue of candidates) {
+      if (!isReservationWithinVenueOpenHours(start, end, venue.openHours)) {
+        continue;
+      }
       let score = 10;
       const matchDetails: string[] = [];
       const facilitiesStr = (venue.facilities || []).join(' ');

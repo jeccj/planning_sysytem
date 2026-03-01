@@ -20,6 +20,7 @@ import {
 } from './dto/create-recurring-reservation.dto';
 import { DataSource } from 'typeorm';
 import { parseDateTimeWithTimezone } from '../common/utils/datetime.utils';
+import { isReservationWithinVenueOpenHours } from '../common/utils/open-hours.utils';
 import { parseVenueLocation } from '../venues/utils/location-utils';
 import {
   buildSlotWindows,
@@ -348,6 +349,11 @@ export class ReservationsService {
     if (draft.attendees_count > venue.capacity) {
       throw new BadRequestException(
         `Attendees exceed venue capacity (${venue.capacity})`,
+      );
+    }
+    if (!isReservationWithinVenueOpenHours(start, end, venue.openHours)) {
+      throw new BadRequestException(
+        `Reservation time is outside venue open hours (${venue.openHours || '08:00-22:00'})`,
       );
     }
 

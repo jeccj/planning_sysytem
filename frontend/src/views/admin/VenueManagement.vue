@@ -364,6 +364,7 @@ const submitForm = async () => {
         const payload = {
             ...form.value,
             capacity: Math.floor(capacity),
+            open_hours: String(form.value.open_hours || '').trim(),
             location: form.value.location || [form.value.building_name, form.value.floor_label, form.value.room_code].filter(Boolean).join(' ')
         }
         
@@ -411,7 +412,7 @@ const submitForm = async () => {
         fetchVenues()
         fetchHierarchyCatalog()
     } catch (e) {
-        ElMessage.error(isEdit.value ? "更新失败" : "创建失败")
+        ElMessage.error(e?.response?.data?.message || (isEdit.value ? "更新失败" : "创建失败"))
         console.error(e)
     }
 }
