@@ -1,0 +1,17 @@
+flowchart LR
+    U["学生/教师/管理员"] --> FE["Vue 前端"]
+    FE --> API["NestJS API 层"]
+    API --> AUTH["认证与权限模块"]
+    API --> VENUE["场馆模块"]
+    API --> RES["预约模块"]
+    API --> ANN["公告模块"]
+    API --> NOTI["通知模块"]
+    API --> CFG["系统配置模块"]
+    API --> NLP["NLP/LLM 模块"]
+    AUTH --> DB[(SQLite)]
+    VENUE --> DB
+    RES --> DB
+    ANN --> DB
+    NOTI --> DB
+    CFG --> DB
+    NLP --> LLM["Gemini / DeepSeek / Custom Provider"]

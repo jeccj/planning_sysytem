@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant U as 用户
+    participant FE as 前端
+    participant BE as 后端
+    participant DB as 数据库
+    
+    U->>FE: 输入用户名/密码
+    FE->>BE: POST /api/auth/login
+    BE->>DB: 查询用户 + bcrypt 验证
+    BE->>DB: 生成新 sessionId 写入用户记录
+    BE->>FE: 返回 JWT (含 sub/role/sid)
+    FE->>FE: 存储 token 到 localStorage
+    
+    Note over FE,BE: 后续请求
+    FE->>BE: 请求带 Authorization Header
+    BE->>DB: 查询用户，比对 payload.sid 与 loginSessionId
+    alt sid 匹配
+        BE->>FE: 正常响应
+    else sid 不匹配（已被踢出）
+        BE->>FE: 401 Unauthorized
+        FE->>FE: 清除 token，跳转登录页
+    end

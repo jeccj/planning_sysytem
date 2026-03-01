@@ -1,0 +1,6 @@
+erDiagram
+    USERS ||--o{ VENUES : manages
+    USERS ||--o{ RESERVATIONS : creates
+    VENUES ||--o{ RESERVATIONS : receives
+    RESERVATIONS ||--o{ RESERVATION_SLOTS : expands
+    USERS ||--o{ NOTIFICATIONS : receives

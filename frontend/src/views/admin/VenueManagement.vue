@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, Plus } from '@element-plus/icons-vue'
 import api from '../../api/axios'
+import AdaptiveDateTimePicker from '../../components/AdaptiveDateTimePicker.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '../../stores/auth'
 import { isUserDismiss } from '../../utils/formatters'
@@ -945,16 +946,20 @@ const openBuildingDetail = (buildingName) => {
                 <el-input v-model="maintenanceForm.reason" placeholder="例如：设备检修" />
             </el-form-item>
             <el-form-item label="起止时间">
-                <el-date-picker
+                <AdaptiveDateTimePicker
                     v-model="maintenanceForm.start_time"
-                    type="datetime"
+                    kind="datetime"
                     placeholder="开始时间"
+                    size="small"
+                    class="maintenance-picker"
                     style="width: 100%; margin-bottom: 10px;"
                 />
-                <el-date-picker
+                <AdaptiveDateTimePicker
                     v-model="maintenanceForm.end_time"
-                    type="datetime"
+                    kind="datetime"
                     placeholder="结束时间"
+                    size="small"
+                    class="maintenance-picker"
                     style="width: 100%;"
                 />
             </el-form-item>
@@ -1264,6 +1269,15 @@ html.dark .meta-pill {
         width: 100%;
     }
 
+    .venue-sub-dialog .maintenance-picker :deep(.el-input__wrapper) {
+        min-height: 34px !important;
+        padding: 0 8px !important;
+    }
+
+    .venue-sub-dialog .maintenance-picker :deep(.el-input__inner) {
+        font-size: 14px !important;
+    }
+
     .venue-edit-dialog :deep(.el-upload--picture-card),
     .venue-edit-dialog :deep(.el-upload-list--picture-card .el-upload-list__item) {
         width: 72px;
@@ -1319,6 +1333,15 @@ html.dark .meta-pill {
     .venue-edit-dialog :deep(.el-upload-list--picture-card .el-upload-list__item) {
         width: 64px;
         height: 64px;
+    }
+
+    .venue-sub-dialog .maintenance-picker :deep(.el-input__wrapper) {
+        min-height: 32px !important;
+        padding: 0 7px !important;
+    }
+
+    .venue-sub-dialog .maintenance-picker :deep(.el-input__inner) {
+        font-size: 13px !important;
     }
 }
 

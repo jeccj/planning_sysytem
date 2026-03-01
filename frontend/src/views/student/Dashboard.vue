@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import SmartSearch from '../../components/SmartSearch.vue'
+import AdaptiveDateTimePicker from '../../components/AdaptiveDateTimePicker.vue'
 import api from '../../api/axios'
 import { ElMessage } from 'element-plus'
 import { ArrowRight, Filter, View, Location, Clock, DataAnalysis, Edit } from '@element-plus/icons-vue'
@@ -1598,9 +1599,9 @@ const goToAnnouncements = () => {
             <div v-if="bookingMode !== 'batch'" class="form-pill">
                 <el-form-item :label="bookingMode === 'recurring' ? '首个预约时间' : '预约时间'" class="booking-time-item">
                     <div class="datetime-range">
-                        <el-date-picker
+                        <AdaptiveDateTimePicker
                             v-model="reservationForm.date"
-                            type="date"
+                            kind="date"
                             placeholder="日期"
                             value-format="YYYY-MM-DD"
                             format="YYYY-MM-DD"
@@ -1608,8 +1609,9 @@ const goToAnnouncements = () => {
                             size="small"
                         />
                         <span class="time-separator">/</span>
-                        <el-time-picker
+                        <AdaptiveDateTimePicker
                             v-model="reservationForm.start_time_input"
+                            kind="time"
                             placeholder="开始"
                             value-format="HH:mm"
                             format="HH:mm"
@@ -1617,8 +1619,9 @@ const goToAnnouncements = () => {
                             size="small"
                         />
                         <span class="time-separator">-</span>
-                        <el-time-picker
+                        <AdaptiveDateTimePicker
                             v-model="reservationForm.end_time_input"
+                            kind="time"
                             placeholder="结束"
                             value-format="HH:mm"
                             format="HH:mm"
@@ -1633,25 +1636,27 @@ const goToAnnouncements = () => {
                 <el-form-item label="批量时段">
                     <div class="batch-slot-list">
                         <div v-for="(slot, index) in batchSlots" :key="index" class="batch-slot-row">
-                            <el-date-picker
+                            <AdaptiveDateTimePicker
                                 v-model="slot.date"
-                                type="date"
+                                kind="date"
                                 placeholder="日期"
                                 value-format="YYYY-MM-DD"
                                 format="YYYY-MM-DD"
                                 class="date-input"
                                 size="small"
                             />
-                            <el-time-picker
+                            <AdaptiveDateTimePicker
                                 v-model="slot.start_time_input"
+                                kind="time"
                                 placeholder="开始"
                                 value-format="HH:mm"
                                 format="HH:mm"
                                 class="time-input"
                                 size="small"
                             />
-                            <el-time-picker
+                            <AdaptiveDateTimePicker
                                 v-model="slot.end_time_input"
+                                kind="time"
                                 placeholder="结束"
                                 value-format="HH:mm"
                                 format="HH:mm"
@@ -1708,9 +1713,9 @@ const goToAnnouncements = () => {
                             <span class="recurring-hint">次（最多 120）</span>
                         </div>
                         <div v-else class="recurring-row">
-                            <el-date-picker
+                            <AdaptiveDateTimePicker
                                 v-model="recurringRule.until_date"
-                                type="date"
+                                kind="date"
                                 placeholder="截止日期"
                                 value-format="YYYY-MM-DD"
                                 format="YYYY-MM-DD"
@@ -3490,7 +3495,7 @@ const goToAnnouncements = () => {
 
     .booking-dialog :deep(.form-pill .el-form-item.booking-time-item .datetime-range) {
         grid-template-columns: 1fr;
-        gap: 8px;
+        gap: 6px;
         max-width: 100%;
     }
 
@@ -3499,7 +3504,7 @@ const goToAnnouncements = () => {
     }
 
     .booking-dialog {
-        --booking-mobile-font-size: 16px;
+        --booking-mobile-font-size: 15px;
     }
 
     .booking-dialog :deep(.form-pill .el-form-item__label) {
@@ -3521,13 +3526,34 @@ const goToAnnouncements = () => {
         font-size: var(--booking-mobile-font-size) !important;
     }
 
+    .booking-dialog .date-input :deep(.el-input__wrapper),
+    .booking-dialog .time-input :deep(.el-input__wrapper) {
+        min-height: 34px !important;
+        padding: 0 8px !important;
+    }
+
+    .booking-dialog .date-input :deep(.el-input__inner),
+    .booking-dialog .time-input :deep(.el-input__inner) {
+        font-size: 14px !important;
+    }
+
     .booking-dialog .batch-slot-row {
-        grid-template-columns: minmax(96px, 1.12fr) minmax(66px, 1fr) minmax(66px, 1fr) auto;
-        gap: 5px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        align-items: stretch;
+    }
+
+    .booking-dialog .batch-slot-row > :nth-child(1) {
+        grid-column: 1 / -1;
+    }
+
+    .booking-dialog .batch-slot-row > :nth-child(4) {
+        grid-column: 1 / -1;
     }
 
     .booking-dialog .batch-slot-row :deep(.el-button) {
-        padding: 0 8px !important;
+        width: 100%;
+        padding: 0 10px !important;
     }
 
     .filter-form {
@@ -3594,6 +3620,25 @@ const goToAnnouncements = () => {
     .demo-condense-stage { min-height: 188px; }
     .demo-break-stage { min-height: 244px; }
     .demo-autofill-item { width: clamp(98px, 30vw, 130px); }
+
+    .booking-dialog {
+        --booking-mobile-font-size: 14px;
+    }
+
+    .booking-dialog .date-input :deep(.el-input__wrapper),
+    .booking-dialog .time-input :deep(.el-input__wrapper) {
+        min-height: 32px !important;
+        padding: 0 7px !important;
+    }
+
+    .booking-dialog .date-input :deep(.el-input__inner),
+    .booking-dialog .time-input :deep(.el-input__inner) {
+        font-size: 13px !important;
+    }
+
+    .booking-dialog .batch-slot-row {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 768px) and (orientation: portrait) {

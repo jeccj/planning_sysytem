@@ -1,0 +1,44 @@
+flowchart TB
+    subgraph Client["客户端层"]
+        Browser["浏览器 (Vue 3 SPA)"]
+    end
+    
+    subgraph Gateway["网关层"]
+        Nginx["Nginx / NestJS Static"]
+    end
+    
+    subgraph Backend["后端服务层"]
+        API["NestJS API 服务"]
+        subgraph Modules["业务模块"]
+            AUTH["认证模块"]
+            USERS["用户模块"]
+            VENUES["场馆模块"]
+            RES["预约模块"]
+            ANN["公告模块"]
+            NOTI["通知模块"]
+            CFG["系统配置"]
+            NLP["NLP/LLM 模块"]
+        end
+    end
+    
+    subgraph Data["数据层"]
+        DB[(SQLite 数据库)]
+        FS["文件系统 (uploads/)"]
+    end
+    
+    subgraph External["外部服务"]
+        LLM["LLM Provider"]
+        GEMINI["Google Gemini"]
+        DEEPSEEK["DeepSeek"]
+        CUSTOM["Custom OpenAI API"]
+    end
+    
+    Browser --> Gateway
+    Gateway --> API
+    API --> Modules
+    Modules --> DB
+    Modules --> FS
+    NLP --> LLM
+    LLM --> GEMINI
+    LLM --> DEEPSEEK
+    LLM --> CUSTOM

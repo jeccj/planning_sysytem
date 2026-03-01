@@ -45,72 +45,9 @@
 
 ### 2.0 系统架构图
 
-```mermaid
-flowchart TB
-    subgraph Client["客户端层"]
-        Browser["浏览器 (Vue 3 SPA)"]
-    end
-    
-    subgraph Gateway["网关层"]
-        Nginx["Nginx / NestJS Static"]
-    end
-    
-    subgraph Backend["后端服务层"]
-        API["NestJS API 服务"]
-        subgraph Modules["业务模块"]
-            AUTH["认证模块"]
-            USERS["用户模块"]
-            VENUES["场馆模块"]
-            RES["预约模块"]
-            ANN["公告模块"]
-            NOTI["通知模块"]
-            CFG["系统配置"]
-            NLP["NLP/LLM 模块"]
-        end
-    end
-    
-    subgraph Data["数据层"]
-        DB[(SQLite 数据库)]
-        FS["文件系统 (uploads/)"]
-    end
-    
-    subgraph External["外部服务"]
-        LLM["LLM Provider"]
-        GEMINI["Google Gemini"]
-        DEEPSEEK["DeepSeek"]
-        CUSTOM["Custom OpenAI API"]
-    end
-    
-    Browser --> Gateway
-    Gateway --> API
-    API --> Modules
-    Modules --> DB
-    Modules --> FS
-    NLP --> LLM
-    LLM --> GEMINI
-    LLM --> DEEPSEEK
-    LLM --> CUSTOM
-```
+![流程图01](./report-assets/diagrams/flow-01.png)
 
-```mermaid
-flowchart LR
-    U["学生/教师/管理员"] --> FE["Vue 前端"]
-    FE --> API["NestJS API 层"]
-    API --> AUTH["认证与权限模块"]
-    API --> VENUE["场馆模块"]
-    API --> RES["预约模块"]
-    API --> ANN["公告模块"]
-    API --> NOTI["通知模块"]
-    API --> CFG["系统配置模块"]
-    API --> NLP["NLP/LLM 模块"]
-    AUTH --> DB[(SQLite)]
-    VENUE --> DB
-    RES --> DB
-    ANN --> DB
-    NOTI --> DB
-    CFG --> DB
-    NLP --> LLM["Gemini / DeepSeek / Custom Provider"]
-```
+![流程图02](./report-assets/diagrams/flow-02.png)
 
 ### 2.1 后端核心模块
 
@@ -147,20 +84,7 @@ flowchart LR
 
 ### 3.1 智能检索与预约流程
 
-```mermaid
-flowchart TD
-    A["用户输入自然语言需求"] --> B["LLM parseIntent 结构化解析"]
-    B --> C["时间窗口解析 resolveSearchWindow"]
-    C --> D["按容量/类型/楼栋筛选候选场馆"]
-    D --> E["计算匹配分数与命中说明"]
-    E --> F{"是否有冲突/维护"}
-    F -- "无冲突" --> G["返回候选列表(最佳结果+更多匹配)"]
-    F -- "有冲突" --> H["剔除冲突场馆"]
-    H --> G
-    G --> I["用户确认并提交预约"]
-    I --> J["写入 pending 预约"]
-    J --> K["异步 AI 风险审核并回填分数/意见"]
-```
+![流程图03](./report-assets/diagrams/flow-03.png)
 
 **智能检索链路详解**：
 
@@ -188,20 +112,7 @@ flowchart TD
 
 ### 3.2 审核与状态流转流程
 
-```mermaid
-stateDiagram-v2
-    [*] --> pending: 创建预约
-    pending --> approved: 管理员批准
-    pending --> rejected: 管理员驳回
-    pending --> canceled: 用户取消
-    approved --> used: 标记已使用
-    approved --> canceled: 用户取消(未开始)
-    approved --> rejected: 管理员驳回
-    maintenance --> canceled: 维护取消
-    rejected --> [*]
-    canceled --> [*]
-    used --> [*]
-```
+![流程图04](./report-assets/diagrams/flow-04.png)
 
 **状态转移规则**（`ALLOWED_STATUS_TRANSITIONS`）：
 
@@ -216,46 +127,11 @@ stateDiagram-v2
 
 ### 3.3 维护窗口调度流程
 
-```mermaid
-flowchart TD
-    A["管理员设置维护时间段"] --> B["开启数据库事务"]
-    B --> C["查找重叠的 pending/approved 预约"]
-    C --> D{"存在冲突预约?"}
-    D -- "是" --> E["取消冲突预约"]
-    E --> F["删除其时间槽"]
-    F --> G["为每个被取消者发送通知"]
-    G --> H["创建 maintenance 类型预约"]
-    D -- "否" --> H
-    H --> I["按 5 分钟切片写入 reservation_slots"]
-    I --> J["提交事务"]
-```
+![流程图05](./report-assets/diagrams/flow-05.png)
 
 ### 3.4 认证与会话管理流程
 
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant FE as 前端
-    participant BE as 后端
-    participant DB as 数据库
-    
-    U->>FE: 输入用户名/密码
-    FE->>BE: POST /api/auth/login
-    BE->>DB: 查询用户 + bcrypt 验证
-    BE->>DB: 生成新 sessionId 写入用户记录
-    BE->>FE: 返回 JWT (含 sub/role/sid)
-    FE->>FE: 存储 token 到 localStorage
-    
-    Note over FE,BE: 后续请求
-    FE->>BE: 请求带 Authorization Header
-    BE->>DB: 查询用户，比对 payload.sid 与 loginSessionId
-    alt sid 匹配
-        BE->>FE: 正常响应
-    else sid 不匹配（已被踢出）
-        BE->>FE: 401 Unauthorized
-        FE->>FE: 清除 token，跳转登录页
-    end
-```
+![流程图06](./report-assets/diagrams/flow-06.png)
 
 ## 4. 软件使用说明
 
@@ -329,14 +205,7 @@ docker-compose up -d --build
 
 ### 5.1 核心实体关系
 
-```mermaid
-erDiagram
-    USERS ||--o{ VENUES : manages
-    USERS ||--o{ RESERVATIONS : creates
-    VENUES ||--o{ RESERVATIONS : receives
-    RESERVATIONS ||--o{ RESERVATION_SLOTS : expands
-    USERS ||--o{ NOTIFICATIONS : receives
-```
+![流程图07](./report-assets/diagrams/flow-07.png)
 
 ### 5.2 枚举定义
 
@@ -874,9 +743,6 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 | 前端离线缓存 | Service Worker + IndexedDB | 弱网环境下基础功能可用 |
 
 ## 9. 模块界面截图与全流程演示（文档末尾附件）
-
-请在提交前将截图放入 `report-assets/screenshots/`，并在下方替换为真实图片文件。建议按编号命名，便于评阅老师快速核对。
-
 ### 9.1 各模块截图清单
 
 1. 登录页：
@@ -899,25 +765,6 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 ![管理端用户管理页](./report-assets/screenshots/09-admin-users.png)
 10. 系统设置页（LLM 配置/导入）：
 ![系统设置页](./report-assets/screenshots/10-system-settings.png)
-
-### 9.2 模拟运行全流程截图或演示视频
-
-建议完整流程：
-
-1. 学生端登录并发起智能搜索
-2. 提交预约并进入待审核
-3. 管理员审核通过/驳回
-4. 学生端查看状态变化与通知
-5. 管理员设置维护时段并触发冲突取消通知（可选）
-
-附件建议二选一：
-
-1. 全流程关键节点截图（至少 6 张）
-2. 一段 2~5 分钟演示视频（推荐 `mp4`）
-
-视频文件示例路径：
-
-- `report-assets/video/full-process-demo.mp4`
 
 ---
 
@@ -963,5 +810,5 @@ private applyBuildingFilter(qb: SelectQueryBuilder, user: User) {
 ---
 
 **报告版本**：v1.0  
-**生成日期**：2025 年 1 月  
-**作者**：[请填写姓名/学号]
+**生成日期**：2026 年 2 月  
+
