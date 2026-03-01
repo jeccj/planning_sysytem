@@ -263,7 +263,7 @@ const handleForgotPassword = async () => {
         <div class="login-actions">
           <el-button text type="primary" @click="openForgotDialog">忘记密码（身份证后六位）</el-button>
         </div>
-        <p class="login-hint">管理员默认账号：admin / admin123（可在 backend-ts/reset_admin.js 重置）</p>
+        <p class="login-hint">学生默认密码（首次登录前）：Student@123456</p>
       </el-form>
 
     </el-card>
