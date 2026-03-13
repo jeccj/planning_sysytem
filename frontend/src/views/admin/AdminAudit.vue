@@ -4,6 +4,8 @@ import api from '../../api/axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { formatDateTime, getStatusLabel, getStatusType, isUserDismiss } from '../../utils/formatters'
 
+const appPrefix = window.location.pathname.startsWith('/app1') ? '/app1' : ''
+
 const reservations = ref([])
 const filterStatus = ref('')
 const keyword = ref('')
@@ -170,8 +172,8 @@ const handleDelete = async (id) => {
 const getProposalLink = (proposalUrl) => {
     if (!proposalUrl) return ''
     if (proposalUrl.startsWith('http://') || proposalUrl.startsWith('https://')) return proposalUrl
-    if (proposalUrl.startsWith('/api/')) return proposalUrl
-    return `/api${proposalUrl}`
+    if (proposalUrl.startsWith('/api/')) return `${appPrefix}${proposalUrl}`
+    return `${appPrefix}/api${proposalUrl}`
 }
 
 const getRiskParams = (score) => {

@@ -50,7 +50,7 @@ const handleLogin = async () => {
   loading.value = true
   try {
     await authStore.login(form.value.username, form.value.password)
-    
+
     // 检查是否首次登录需要修改密码
     if (authStore.user?.is_first_login) {
       passwordForm.value.oldPassword = form.value.password
@@ -58,10 +58,10 @@ const handleLogin = async () => {
       loading.value = false
       return
     }
-    
+
     // 获取公告并显示确认
     await fetchAnnouncementsAndShow()
-    
+
   } catch (error) {
     console.error("Login failed:", error)
     let errorMessage = '登录失败，请稍后重试'
@@ -94,17 +94,17 @@ const handlePasswordChange = async () => {
     ElMessage.warning('请输入新密码')
     return
   }
-  
+
   if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
     ElMessage.warning('两次输入的密码不一致')
     return
   }
-  
+
   if (passwordForm.value.newPassword.length < 6) {
     ElMessage.warning('密码长度至少6位')
     return
   }
-  
+
   passwordLoading.value = true
   try {
     await api.put('/auth/change-password', {
@@ -148,14 +148,14 @@ const fetchAnnouncementsAndShow = async () => {
   try {
     const res = await api.get('/announcements/')
     latestAnnouncements.value = res.data.slice(0, 3) // 显示最新3条
-    
+
     // Fetch Notifications
     try {
-        const notifRes = await api.get('/notifications/')
-        // Filter unread
-        unreadNotifications.value = notifRes.data.filter(n => !n.is_read).slice(0, 5)
+      const notifRes = await api.get('/notifications/')
+      // Filter unread
+      unreadNotifications.value = notifRes.data.filter(n => !n.is_read).slice(0, 5)
     } catch (e) {
-        console.error("Failed to fetch notifications", e)
+      console.error("Failed to fetch notifications", e)
     }
 
     if (latestAnnouncements.value.length > 0 || unreadNotifications.value.length > 0) {
@@ -263,24 +263,15 @@ const handleForgotPassword = async () => {
         <div class="login-actions">
           <el-button text type="primary" @click="openForgotDialog">忘记密码（身份证后六位）</el-button>
         </div>
-        <p class="login-hint">学生默认密码（首次登录前）：Student@123456</p>
+        <p class="login-hint">admin/123456<br>学生: student0000x 默认密码（首次登录前）：Student@123456</p>
       </el-form>
 
     </el-card>
 
     <!-- 首次登录强制修改密码弹窗 -->
-    <el-dialog 
-      v-model="showPasswordChangeDialog" 
-      title="首次登录请修改密码" 
-      width="400px" 
-      :close-on-click-modal="false"
-      :close-on-press-escape="false"
-      :show-close="false"
-      :lock-scroll="false"
-      class="glass-dialog"
-      align-center
-      append-to-body
-    >
+    <el-dialog v-model="showPasswordChangeDialog" title="首次登录请修改密码" width="400px" :close-on-click-modal="false"
+      :close-on-press-escape="false" :show-close="false" :lock-scroll="false" class="glass-dialog" align-center
+      append-to-body>
       <div class="password-change-hint">
         <el-alert type="warning" :closable="false" show-icon>
           为了账户安全，首次登录需要修改初始密码
@@ -288,21 +279,11 @@ const handleForgotPassword = async () => {
       </div>
       <el-form :model="passwordForm" label-position="top" style="margin-top: 20px;">
         <el-form-item label="新密码">
-          <el-input 
-            v-model="passwordForm.newPassword" 
-            type="password" 
-            placeholder="请输入新密码（至少6位）" 
-            show-password
-          />
+          <el-input v-model="passwordForm.newPassword" type="password" placeholder="请输入新密码（至少6位）" show-password />
         </el-form-item>
         <el-form-item label="确认新密码">
-          <el-input 
-            v-model="passwordForm.confirmPassword" 
-            type="password" 
-            placeholder="再次输入新密码" 
-            show-password
-            @keyup.enter="handlePasswordChange"
-          />
+          <el-input v-model="passwordForm.confirmPassword" type="password" placeholder="再次输入新密码" show-password
+            @keyup.enter="handlePasswordChange" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -312,38 +293,29 @@ const handleForgotPassword = async () => {
       </template>
     </el-dialog>
 
-    <el-dialog 
-      v-model="showAnnouncementDialog" 
-      title="系统通知与公告" 
-      width="550px"
-      :close-on-click-modal="false"
-      :close-on-press-escape="false"
-      :show-close="false"
-      :lock-scroll="false"
-      class="glass-dialog announcement-dialog"
-      align-center
-      append-to-body
-    >
+    <el-dialog v-model="showAnnouncementDialog" title="系统通知与公告" width="550px" :close-on-click-modal="false"
+      :close-on-press-escape="false" :show-close="false" :lock-scroll="false" class="glass-dialog announcement-dialog"
+      align-center append-to-body>
       <div class="announcement-list">
         <!-- Unread Notifications Section -->
         <div v-if="unreadNotifications.length > 0" class="section-block">
-            <h4 class="section-title">✨ 待处理通知</h4>
-            <div v-for="item in unreadNotifications" :key="'n'+item.id" class="announcement-item notification-item">
-                <div class="announcement-title">{{ item.title }}</div>
-                <div class="announcement-time">{{ formatTime(item.created_at) }}</div>
-                <div class="announcement-content">{{ item.content }}</div>
-            </div>
-            <el-divider v-if="latestAnnouncements.length > 0" />
+          <h4 class="section-title">✨ 待处理通知</h4>
+          <div v-for="item in unreadNotifications" :key="'n' + item.id" class="announcement-item notification-item">
+            <div class="announcement-title">{{ item.title }}</div>
+            <div class="announcement-time">{{ formatTime(item.created_at) }}</div>
+            <div class="announcement-content">{{ item.content }}</div>
+          </div>
+          <el-divider v-if="latestAnnouncements.length > 0" />
         </div>
 
         <!-- Announcements Section -->
         <div v-if="latestAnnouncements.length > 0" class="section-block">
-            <h4 class="section-title">📢 最新公告</h4>
-            <div v-for="item in latestAnnouncements" :key="'a'+item.id" class="announcement-item">
-                <div class="announcement-title">{{ item.title }}</div>
-                <div class="announcement-time">{{ formatTime(item.publish_time) }}</div>
-                <div class="announcement-content">{{ item.content }}</div>
-            </div>
+          <h4 class="section-title">📢 最新公告</h4>
+          <div v-for="item in latestAnnouncements" :key="'a' + item.id" class="announcement-item">
+            <div class="announcement-title">{{ item.title }}</div>
+            <div class="announcement-time">{{ formatTime(item.publish_time) }}</div>
+            <div class="announcement-content">{{ item.content }}</div>
+          </div>
         </div>
       </div>
       <template #footer>
@@ -353,14 +325,7 @@ const handleForgotPassword = async () => {
       </template>
     </el-dialog>
 
-    <el-dialog
-      v-model="showForgotDialog"
-      title="忘记密码"
-      width="430px"
-      class="glass-dialog"
-      align-center
-      append-to-body
-    >
+    <el-dialog v-model="showForgotDialog" title="忘记密码" width="430px" class="glass-dialog" align-center append-to-body>
       <el-alert type="info" :closable="false" show-icon>
         使用用户名 + 身份证后六位验证身份后重置新密码
       </el-alert>
@@ -369,24 +334,14 @@ const handleForgotPassword = async () => {
           <el-input v-model="forgotForm.username" placeholder="请输入用户名 / 学号" />
         </el-form-item>
         <el-form-item label="身份证后六位">
-          <el-input
-            v-model="forgotForm.identity_last6"
-            maxlength="6"
-            show-word-limit
-            placeholder="6位数字"
-          />
+          <el-input v-model="forgotForm.identity_last6" maxlength="6" show-word-limit placeholder="6位数字" />
         </el-form-item>
         <el-form-item label="新密码">
           <el-input v-model="forgotForm.new_password" type="password" show-password placeholder="至少6位" />
         </el-form-item>
         <el-form-item label="确认新密码">
-          <el-input
-            v-model="forgotForm.confirm_password"
-            type="password"
-            show-password
-            placeholder="再次输入新密码"
-            @keyup.enter="handleForgotPassword"
-          />
+          <el-input v-model="forgotForm.confirm_password" type="password" show-password placeholder="再次输入新密码"
+            @keyup.enter="handleForgotPassword" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -512,19 +467,40 @@ html.dark .login-hint {
   animation: login-notice-card-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.announcement-item:nth-child(2) { animation-delay: 40ms; }
-.announcement-item:nth-child(3) { animation-delay: 80ms; }
-.announcement-item:nth-child(4) { animation-delay: 120ms; }
-.announcement-item:nth-child(5) { animation-delay: 160ms; }
-.announcement-item:nth-child(6) { animation-delay: 200ms; }
-.announcement-item:nth-child(7) { animation-delay: 240ms; }
-.announcement-item:nth-child(8) { animation-delay: 280ms; }
+.announcement-item:nth-child(2) {
+  animation-delay: 40ms;
+}
+
+.announcement-item:nth-child(3) {
+  animation-delay: 80ms;
+}
+
+.announcement-item:nth-child(4) {
+  animation-delay: 120ms;
+}
+
+.announcement-item:nth-child(5) {
+  animation-delay: 160ms;
+}
+
+.announcement-item:nth-child(6) {
+  animation-delay: 200ms;
+}
+
+.announcement-item:nth-child(7) {
+  animation-delay: 240ms;
+}
+
+.announcement-item:nth-child(8) {
+  animation-delay: 280ms;
+}
 
 @keyframes login-notice-card-in {
   from {
     opacity: 0;
     transform: translateY(8px) scale(0.992);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -557,15 +533,15 @@ html.dark .login-hint {
 }
 
 .section-title {
-    margin: 0 0 10px 0;
-    font-size: 14px;
-    color: #606266;
-    font-weight: 600;
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #606266;
+  font-weight: 600;
 }
 
 .notification-item {
-    border-left: 3px solid #e6a23c;
-    background: rgba(230, 162, 60, 0.1);
+  border-left: 3px solid #e6a23c;
+  background: rgba(230, 162, 60, 0.1);
 }
 
 .password-change-hint {

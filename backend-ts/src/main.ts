@@ -69,9 +69,20 @@ async function bootstrap() {
     }),
   );
 
-  // Serve uploaded files
   const expressApp = app.getHttpAdapter().getInstance();
   const express = require('express');
+
+  // Support reverse proxies that forward /app1/* without stripping prefix.
+  expressApp.use((req: any, _res: any, next: any) => {
+    if (req.url === '/app1') {
+      req.url = '/';
+    } else if (req.url.startsWith('/app1/')) {
+      req.url = req.url.slice('/app1'.length) || '/';
+    }
+    next();
+  });
+
+  // Serve uploaded files
   const uploadsPath = path.join(__dirname, '..', 'uploads');
   expressApp.use('/uploads', express.static(uploadsPath));
   expressApp.use('/api/uploads', express.static(uploadsPath)); // 同时支持 /api/uploads 路径

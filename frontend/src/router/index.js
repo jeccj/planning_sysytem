@@ -16,6 +16,7 @@ let lastAuthCheckAt = 0
 let pendingAuthCheck = null
 const AUTH_CHECK_TTL_MS = 300_000
 const AUTH_CHECK_TIMEOUT_MS = 8_000
+const appPrefix = window.location.pathname.startsWith('/app1') ? '/app1' : ''
 
 const ensureSessionValid = async (authStore) => {
     if (!authStore.token) return false
@@ -30,7 +31,7 @@ const ensureSessionValid = async (authStore) => {
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), AUTH_CHECK_TIMEOUT_MS)
         try {
-            const res = await fetch('/api/users/me', {
+            const res = await fetch(`${appPrefix}/api/users/me`, {
                 method: 'GET',
                 headers: {
                     Authorization: `Bearer ${authStore.token}`,

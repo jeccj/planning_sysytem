@@ -3,8 +3,10 @@ import { useAuthStore } from '../stores/auth'
 import router from '../router'
 import { ElMessage } from 'element-plus'
 
+const appPrefix = window.location.pathname.startsWith('/app1') ? '/app1' : ''
+
 const api = axios.create({
-    baseURL: '/api',
+    baseURL: `${appPrefix}/api`,
     timeout: 15000
 })
 
